@@ -1,0 +1,8 @@
+# Vendored and generated files. Their formatting is not ours to fix, and their
+# whitespace is not a defect of this repository, so keep them out of git's
+# whitespace checks and out of the language statistics.
+assets/alpinejs-*.min.js  linguist-vendored -whitespace
+assets/qunit-*.js         linguist-vendored -whitespace
+assets/qunit-*.css        linguist-vendored -whitespace
+assets/tailwind.css       linguist-generated -whitespace
+package-lock.json         linguist-generated

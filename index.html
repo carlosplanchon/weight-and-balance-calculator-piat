@@ -1,0 +1,2684 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipistrel Alpha Trainer - W&B</title>
+    <link rel="icon" type="image/png" href="assets/light_aircraft_favicon.png">
+    <link rel="stylesheet" href="assets/tailwind.css?v=4d255223">
+    <!-- Alpine JS (v3.15.12 pinned, served locally so the app works offline) -->
+    <script defer src="assets/alpinejs-3.15.12.min.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+        canvas { border: 1px solid #e5e7eb; background-color: #fff; }
+        /* ~44px touch targets for finger use (preflight from a phone) */
+        #main-app input[type="number"], #main-app select { min-height: 44px; }
+        .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 9999px; margin-right: 4px; vertical-align: middle; }
+        .legend-box { display: inline-block; width: 14px; height: 11px; border: 2px solid #475569; background: rgba(22, 163, 74, 0.08); margin-right: 4px; vertical-align: middle; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+
+    <!-- APP CONTAINER (hidden when test=true) -->
+    <!-- No x-init: Alpine already auto-calls the data object's init(); having both ran it twice -->
+    <div id="main-app" class="max-w-4xl mx-auto p-4" x-data="wbCalculator()" x-cloak>
+
+        <!-- Header & Toggles -->
+        <header class="mb-6 border-b pb-4 border-gray-300 flex flex-col md:flex-row justify-between items-start md:items-end">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">Pipistrel Alpha Trainer</h1>
+                <p class="text-gray-600" x-text="t('subtitle')"></p>
+            </div>
+
+            <div class="mt-4 md:mt-0 flex flex-col items-end gap-2">
+                <!-- Language Switcher -->
+                <div class="flex bg-gray-200 rounded-lg p-1">
+                    <button @click="setLang('es')" :class="lang === 'es' ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700'" class="px-3 py-1 rounded-md text-xs font-bold transition-all">ES</button>
+                    <button @click="setLang('en')" :class="lang === 'en' ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700'" class="px-3 py-1 rounded-md text-xs font-bold transition-all">EN</button>
+                </div>
+                <!-- Unit Switcher -->
+                <div class="flex bg-gray-200 rounded-lg p-1">
+                    <button @click="setUnits('metric')" :class="units === 'metric' ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-md text-sm font-bold transition-all" x-text="t('metric')"></button>
+                    <button @click="setUnits('imperial')" :class="units === 'imperial' ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-md text-sm font-bold transition-all" x-text="t('imperial')"></button>
+                </div>
+            </div>
+        </header>
+
+        <!-- STATUS SUMMARY: W&B, load and fuel as separate states. Sticky on all screen sizes. -->
+        <div class="sticky top-0 z-20 mb-6">
+            <div class="bg-white rounded-lg shadow border border-gray-200 p-3">
+                <div x-show="!planeSelected" class="text-center text-sm font-bold text-red-600 py-1" x-text="t('select_prompt')"></div>
+                <div x-show="planeSelected" class="grid grid-cols-3 md:grid-cols-5 gap-2 text-center">
+                    <!-- Weight and CG rest on the empty weight, the pilot AND the fuel: while
+                         any of them is pending they show a dash, not a figure standing on an
+                         implicit 0 -->
+                    <div>
+                        <div class="text-xs text-gray-500" x-text="t('sum_weight_to')"></div>
+                        <div class="text-sm font-bold" :class="wbPending ? 'text-gray-500' : ((results.takeoff.weight > currentLimits.mtom || results.takeoff.weight < currentLimits.minW) ? 'text-red-600' : 'text-slate-800')"
+                             x-text="fmt(results.takeoff.weight, labels.weight, wbPending)"></div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500" x-text="t('sum_cg_to')"></div>
+                        <div class="text-sm font-bold" :class="wbPending ? 'text-gray-500' : ((results.takeoff.cg < currentLimits.fwd || results.takeoff.cg > currentLimits.aft) ? 'text-red-600' : 'text-slate-800')"
+                             x-text="fmt(results.takeoff.cg, labels.arm, wbPending)"></div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500" x-text="t('sum_cg_ldg')"></div>
+                        <div class="text-sm font-bold" :class="wbPending ? 'text-gray-500' : ((results.landing.cg < currentLimits.fwd || results.landing.cg > currentLimits.aft) ? 'text-red-600' : 'text-slate-800')"
+                             x-text="fmt(results.landing.cg, labels.arm, wbPending)"></div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500" x-text="t('sum_load')"></div>
+                        <div class="text-sm font-bold" :class="dataPending ? 'text-gray-500' : (hasLoadErrors ? 'text-red-600' : 'text-green-600')" x-text="dataPending ? t('sum_pending') : (hasLoadErrors ? t('sum_check') : 'OK')"></div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500" x-text="t('sum_fuel')"></div>
+                        <div class="text-sm font-bold" :class="fuelSummaryClass" x-text="fuelSummaryLabel"></div>
+                    </div>
+                </div>
+                <!-- Data age clock + reset: appears once something has been entered -->
+                <div x-show="savedAt !== null" class="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs" x-cloak>
+                    <span class="flex items-center gap-1" :class="dataAgeClass">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span x-text="dataAge"></span>
+                    </span>
+                    <button @click="reset()" class="font-bold text-red-600 underline px-2 py-1" x-text="t('reset_button')"></button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <!-- INPUTS -->
+            <div class="space-y-6">
+
+                <!-- 1. Aircraft Selection -->
+                <div class="bg-white p-5 rounded-lg shadow border-l-4 border-blue-500">
+                    <h2 class="font-bold text-lg mb-3 text-slate-700 border-b pb-1" x-text="t('sec_aircraft')"></h2>
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold text-gray-700 mb-1" x-text="t('registration')"></label>
+                        <select x-model="selectedPlaneId" @change="loadPlaneData()"
+                            :class="planeSelected ? 'border-blue-300 bg-blue-50' : 'border-red-500 bg-red-50'"
+                            class="w-full p-2 border rounded font-bold text-slate-700 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="" disabled x-text="t('select_plane')"></option>
+                            <template x-for="plane in fleet" :key="plane.id">
+                                <option :value="plane.id" x-text="plane.id === 'custom' ? t('custom_plane') : plane.name"></option>
+                            </template>
+                        </select>
+                        <!-- Selected aircraft metadata (S/N, POH document) -->
+                        <p class="text-xs text-gray-500 mt-1" x-show="currentPlaneMeta" x-text="currentPlaneMeta"></p>
+                        <!-- Fleet file could not be read: the registrations are simply not
+                             there, so say it rather than let the list look complete -->
+                        <p x-show="fleetFailed" class="text-xs bg-amber-50 border border-amber-300 text-amber-800 p-2 rounded mt-1 fade-in" x-cloak>
+                            ⚠️ <span x-text="t('fleet_error')"></span>
+                        </p>
+                        <p x-show="fleetSkipped > 0" class="text-xs bg-amber-50 border border-amber-300 text-amber-800 p-2 rounded mt-1 fade-in" x-cloak>
+                            ⚠️ <span x-text="t('fleet_skipped').replace('{n}', fleetSkipped)"></span>
+                        </p>
+                        <!-- Empty weight moves with repaints, instruments and reweighing -->
+                        <p x-show="currentPlaneWeighingDate" class="text-xs text-gray-500 mt-1" x-cloak>
+                            <span x-text="t('weighed_on')"></span> <span x-text="currentPlaneWeighingDate"></span>
+                        </p>
+                        <p x-show="currentPlaneUndated" class="text-xs text-amber-600 font-semibold mt-1 fade-in" x-cloak>
+                            ⚠️ <span x-text="t('weighing_undated')"></span>
+                        </p>
+                        <!-- The manifest is the authority on this aircraft's CG limits; when it
+                             has not stated them, the envelope in use is the type's -->
+                        <p x-show="currentPlaneLimitsFromType" class="text-xs text-amber-600 font-semibold mt-1 fade-in" x-cloak>
+                            ⚠️ <span x-text="t('limits_from_type')"></span>
+                        </p>
+                        <p x-show="currentPlaneNote" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded mt-1 fade-in" x-cloak x-text="currentPlaneNote"></p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-600"><span x-text="t('empty_weight')"></span> (<span x-text="labels.weight"></span>)</label>
+                            <input type="number" step="0.1" min="0"
+                                x-model.number="aircraft.weight"
+                                @input="update"
+                                :disabled="selectedPlaneId !== 'custom'"
+                                :class="selectedPlaneId !== 'custom' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white text-gray-800'"
+                                class="w-full mt-1 p-2 border rounded focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-600"><span x-text="t('empty_arm')"></span> (<span x-text="labels.arm"></span>)</label>
+                            <input type="number" step="0.1"
+                                x-model.number="aircraft.arm"
+                                @input="update"
+                                :disabled="selectedPlaneId !== 'custom'"
+                                :class="selectedPlaneId !== 'custom' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white text-gray-800'"
+                                class="w-full mt-1 p-2 border rounded focus:ring-blue-500 focus:border-blue-500 transition-colors">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Load -->
+                <div class="bg-white p-5 rounded-lg shadow border-l-4" :class="hasLoadErrors ? 'border-red-500' : 'border-gray-200'">
+                    <!-- The panel edge turns red only for a limit that is actually broken;
+                         a pending field speaks through its own amber note below -->
+
+                    <h2 class="font-bold text-lg mb-3 text-slate-700 border-b pb-1" x-text="t('sec_load')"></h2>
+                    <div class="space-y-4">
+                        <!-- PILOT -->
+                        <div>
+                            <div class="flex justify-between items-center">
+                                <label class="text-sm font-medium text-gray-700 w-1/3"><span x-text="t('pilot')"></span> (<span x-text="labels.weight"></span>)</label>
+                                <input type="number" min="0" x-model.number="load.pilot" @input="update"
+                                    :class="Number.isFinite(load.pilot) && (load.pilot > currentLimits.maxSeat || load.pilot < currentLimits.minPilot) ? 'border-red-500 bg-red-50 text-red-700 font-bold' : 'border-gray-300'"
+                                    class="w-24 p-1 border rounded text-right transition-colors focus:ring-2 focus:ring-blue-200 outline-none">
+                                <span class="text-xs text-gray-400 w-auto ml-2 text-right">
+                                    <span x-text="t('arm')"></span> (<span x-text="labels.arm"></span>):
+                                    <span x-text="currentArms.pilot"></span>
+                                </span>
+                            </div>
+                            <!-- MAX SEAT WEIGHT ALERT -->
+                            <div x-show="load.pilot > currentLimits.maxSeat" class="text-xs bg-red-100 text-red-700 p-1 rounded mt-1 text-right fade-in border border-red-200">
+                                ⚠️ <span class="font-bold" x-text="t('alert')"></span> <span x-text="t('err_seat_max')"></span> (> <span x-text="currentLimits.maxSeat"></span> <span x-text="labels.weight"></span>)
+                            </div>
+                            <!-- Empty and below-minimum are different situations: 'below
+                                 minimum' makes no sense for a field never filled in -->
+                            <div x-show="!Number.isFinite(load.pilot)" class="text-xs text-amber-600 font-bold mt-1 text-right fade-in">⚠️ <span x-text="t('err_pilot_required')"></span></div>
+                            <div x-show="Number.isFinite(load.pilot) && load.pilot < currentLimits.minPilot" class="text-xs text-amber-600 font-bold mt-1 text-right fade-in">⚠️ <span x-text="t('err_pilot_min')"></span> (&lt; <span x-text="currentLimits.minPilot"></span> <span x-text="labels.weight"></span>)</div>
+                        </div>
+
+                        <!-- CO-PILOT -->
+                        <div>
+                            <div class="flex justify-between items-center">
+                                <label class="text-sm font-medium text-gray-700 w-1/3"><span x-text="t('copilot')"></span> (<span x-text="labels.weight"></span>)</label>
+                                <input type="number" min="0" x-model.number="load.copilot" @input="update"
+                                    :class="load.copilot > currentLimits.maxSeat ? 'border-red-500 bg-red-50 text-red-700 font-bold' : 'border-gray-300'"
+                                    class="w-24 p-1 border rounded text-right transition-colors focus:ring-2 focus:ring-blue-200 outline-none">
+                                <span class="text-xs text-gray-400 w-auto ml-2 text-right">
+                                    <span x-text="t('arm')"></span> (<span x-text="labels.arm"></span>):
+                                    <span x-text="currentArms.copilot"></span>
+                                </span>
+                            </div>
+                            <!-- MAX SEAT WEIGHT ALERT -->
+                            <div x-show="load.copilot > currentLimits.maxSeat" class="text-xs bg-red-100 text-red-700 p-1 rounded mt-1 text-right fade-in border border-red-200">
+                                ⚠️ <span class="font-bold" x-text="t('alert')"></span> <span x-text="t('err_seat_max')"></span> (> <span x-text="currentLimits.maxSeat"></span> <span x-text="labels.weight"></span>)
+                            </div>
+                        </div>
+
+                        <!-- STRUCTURAL ALERT (max occupants) -->
+                        <div x-show="(load.pilot + load.copilot) > currentLimits.maxOccupants" class="bg-red-100 border border-red-400 text-red-700 px-2 py-1 rounded text-xs text-center fade-in">
+                            ⚠️ <strong x-text="t('err_struct_title')"></strong> <span x-text="t('err_struct_msg') + ' ' + currentLimits.maxOccupants"></span>.
+                        </div>
+
+                        <!-- BAGGAGE -->
+                        <div class="pt-2 border-t">
+                            <div class="flex justify-between items-center">
+                                <label class="text-sm font-medium text-gray-700 w-1/3"><span x-text="t('baggage')"></span> (<span x-text="labels.weight"></span>)</label>
+                                <input type="number" min="0" x-model.number="load.baggage" @input="update" :class="load.baggage > currentLimits.maxBaggage ? 'border-red-500 bg-red-50' : 'border-gray-300'" class="w-24 p-1 border rounded text-right transition-colors">
+                                <span class="text-xs text-gray-400 w-auto ml-2 text-right">
+                                    <span x-text="t('arm')"></span> (<span x-text="labels.arm"></span>):
+                                    <span x-text="currentArms.baggage"></span>
+                                </span>
+                            </div>
+                            <div x-show="load.baggage > currentLimits.maxBaggage" class="text-xs text-red-600 font-bold mt-1 text-right fade-in">⚠️ <span x-text="t('err_bag_max')"></span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Performance & Fuel -->
+                <div class="bg-white p-5 rounded-lg shadow">
+                    <h2 class="font-bold text-lg mb-3 text-slate-700 border-b pb-1" x-text="t('sec_perf')"></h2>
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold text-gray-700 mb-1" x-text="t('power_setting')"></label>
+                        <select x-model="selectedPerfIndex" @change="update" class="w-full p-2 border border-green-300 bg-green-50 rounded text-sm font-semibold text-slate-700">
+                            <template x-for="(profile, index) in perfProfiles" :key="index">
+                                <option :value="index" x-text="profile.hp + '% HP @ ' + profile.rpm + ' RPM (' + profile.ktas + ' KTAS)'"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <label class="text-sm font-medium text-gray-700"><span x-text="t('fuel_start')"></span> (<span x-text="labels.fuel"></span>)</label>
+                            <!-- Input max = total tank capacity per unit system; update() clamps as well -->
+                            <input type="number" min="0" :max="currentLimits.maxFuelTotal" x-model.number="fuel.startAmount" @input="update" class="w-24 p-1 border rounded text-right font-bold text-blue-600">
+                        </div>
+
+                        <!-- ALERT: fuel entered but at or below the unusable amount -->
+                        <div x-show="fuelBelowUnusable" class="text-xs bg-red-100 border border-red-400 text-red-700 p-2 rounded mt-1 fade-in font-bold">
+                            ⚠️ <span x-text="t('warn_fuel_unusable')"></span> (<span x-text="currentUnusableFuel"></span> <span x-text="labels.fuel"></span>)
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <label class="text-sm font-medium text-gray-700"><span x-text="t('flight_time')"></span></label>
+                            <input type="number" min="0" step="0.1" x-model.number="fuel.flightTime" @input="update" class="w-24 p-1 border rounded text-right">
+                        </div>
+                        <div class="text-sm text-gray-600 bg-gray-50 p-2 rounded border space-y-2">
+                             <div class="flex justify-between">
+                                <span x-text="t('fuel_flow')"></span>
+                                <span class="font-bold" x-text="currentFuelFlow + ' ' + labels.flow"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span x-text="t('total_cons')"></span>
+                                <span x-text="fuelResults.burnedAmount.toFixed(1) + ' ' + labels.fuel"></span>
+                            </div>
+                            <div class="flex justify-between font-bold" :class="fuelPending ? 'text-gray-500' : (fuelResults.remainingAmount < 0 ? 'text-red-600' : 'text-green-600')">
+                                <span x-text="t('fuel_rem')"></span>
+                                <span x-text="fmt(fuelResults.remainingAmount, labels.fuel, fuelPending)"></span>
+                            </div>
+                            <!-- Read as a pair: what the plan asks for vs. what the fuel gives -->
+                            <div class="flex justify-between border-t pt-1 text-blue-700">
+                                <span x-text="t('est_range')"></span>
+                                <span>~<span class="font-bold" x-text="fuelResults.rangeNM"></span> NM</span>
+                            </div>
+                            <div class="flex justify-between text-blue-700">
+                                <span>
+                                    <span x-text="t('endurance')"></span>
+                                    <!-- The reserve caveat rides under the label so the figure stays on one line -->
+                                    <span class="block text-xs text-blue-500" x-text="t('endurance_note')"></span>
+                                </span>
+                                <span class="whitespace-nowrap ml-2" :class="fuelPending ? 'text-gray-500' : ''">
+                                    <template x-if="fuelPending">
+                                        <span class="font-bold">---</span>
+                                    </template>
+                                    <template x-if="!fuelPending">
+                                        <span>
+                                            <span class="font-bold" x-text="fuelResults.enduranceHours.toFixed(1)"></span> h
+                                            (~<span class="font-bold" x-text="fuelResults.enduranceNM"></span> NM)
+                                        </span>
+                                    </template>
+                                </span>
+                            </div>
+                        </div>
+                        <div x-show="!fuelPending && fuelResults.remainingAmount < 0" class="p-2 bg-red-100 border border-red-400 text-red-700 text-xs rounded fade-in">
+                            ⚠️ <strong x-text="t('danger')"></strong>: <span x-text="t('err_fuel')"></span>
+                        </div>
+                        <!-- LOW RESERVE ALERT (< 30 min) -->
+                        <div x-show="!fuelPending && fuelResults.remainingAmount >= 0 && fuelResults.remainingTime < 0.5" class="mt-2 p-2 bg-amber-100 border border-amber-400 text-amber-800 text-xs rounded fade-in">
+                            ⚠️ <strong x-text="t('warn_fuel_res')"></strong>
+                            (<span x-text="Math.floor(fuelResults.remainingTime * 60)"></span> min)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OUTPUTS -->
+            <div class="space-y-6">
+                <!-- No registration selected, no results: prevents a green state built on generic data -->
+                <div x-show="!planeSelected" class="bg-white p-5 rounded-lg shadow border-l-4 border-red-500">
+                    <p class="text-sm font-bold text-red-600" x-text="t('select_prompt')"></p>
+                </div>
+                <div class="bg-white p-5 rounded-lg shadow" x-show="planeSelected">
+                    <h2 class="font-bold text-lg mb-3 text-slate-700 border-b pb-1" x-text="t('results')"></h2>
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-gray-100 text-gray-600">
+                            <tr>
+                                <th class="p-2" x-text="t('phase')"></th>
+                                <th class="p-2">
+                                    <span x-text="t('weight')"></span> (<span x-text="labels.weight"></span>)
+                                </th>
+                                <th class="p-2">
+                                    CG (<span x-text="labels.arm"></span>)
+                                </th>
+                                <th class="p-2" x-text="t('status')"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr>
+                                <td class="p-2 font-bold text-blue-600" x-text="t('phase_to')"></td>
+                                <td class="p-2" x-text="num(results.takeoff.weight)"></td>
+                                <td class="p-2" x-text="num(results.takeoff.cg)"></td>
+                                <td class="p-2"><span class="inline-flex items-center gap-1.5 text-xs font-semibold" :class="statusTextClass(results.takeoff)"><span class="w-2 h-2 rounded-full shrink-0" :class="statusDotClass(results.takeoff)"></span><span x-text="statusLabel(results.takeoff)"></span></span></td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 font-bold text-green-600" x-text="t('phase_ldg')"></td>
+                                <td class="p-2" x-text="num(results.landing.weight)"></td>
+                                <td class="p-2" x-text="num(results.landing.cg)"></td>
+                                <td class="p-2"><span class="inline-flex items-center gap-1.5 text-xs font-semibold" :class="statusTextClass(results.landing)"><span class="w-2 h-2 rounded-full shrink-0" :class="statusDotClass(results.landing)"></span><span x-text="statusLabel(results.landing)"></span></span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div class="mt-4 space-y-2">
+                        <!-- Gated on wbPending: a weight built on a missing empty weight, pilot
+                             or tank reading is not under the minimum, it is simply not known yet -->
+                        <div x-show="showLimitWarnings && results.takeoff.weight > currentLimits.mtom" class="text-xs text-red-600 font-bold fade-in">⚠️ <span x-text="t('warn_mtom')"></span></div>
+                        <div x-show="showLimitWarnings && results.takeoff.weight < currentLimits.minW" class="text-xs text-red-600 font-bold fade-in">⚠️ <span x-text="t('warn_minw_to')"></span></div>
+                        <div x-show="showLimitWarnings && results.landing.weight < currentLimits.minW" class="text-xs text-red-600 font-bold fade-in">⚠️ <span x-text="t('warn_minw_ldg')"></span></div>
+                        <div x-show="showLimitWarnings && (results.takeoff.cg < currentLimits.fwd || results.takeoff.cg > currentLimits.aft)" class="text-xs text-red-600 font-bold fade-in">⚠️ <span x-text="t('warn_cg_to')"></span></div>
+                        <div x-show="showLimitWarnings && (results.landing.cg < currentLimits.fwd || results.landing.cg > currentLimits.aft)" class="text-xs text-red-600 font-bold fade-in">⚠️ <span x-text="t('warn_cg_ldg')"></span></div>
+                    </div>
+                </div>
+                <div class="bg-white p-5 rounded-lg shadow" x-show="planeSelected">
+                    <h2 class="font-bold text-lg mb-3 text-slate-700" x-text="t('envelope')"></h2>
+                    <canvas id="wbChart" width="400" height="300" class="w-full h-auto rounded"></canvas>
+                    <div class="flex flex-wrap gap-2 mt-2 text-xs text-gray-600">
+                        <span><span class="legend-dot" style="background: #2563eb"></span><span x-text="t('legend_to')"></span></span>
+                        <span><span class="legend-dot" style="background: #16a34a"></span><span x-text="t('legend_ldg')"></span></span>
+                        <span><span class="legend-dot" style="background: #dc2626"></span><span x-text="t('legend_invalid')"></span></span>
+                        <span><span class="legend-box"></span><span x-text="t('legend_envelope')"></span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detail Table -->
+        <div class="bg-white p-6 rounded-lg shadow mt-6" x-show="planeSelected">
+            <h2 class="font-bold text-lg mb-4 text-slate-700 border-b pb-2" x-text="t('sec_detail')"></h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left border-collapse">
+                    <thead class="bg-gray-100 text-gray-700 border-b-2 border-gray-300">
+                        <tr>
+                            <th class="p-3" x-text="t('item')"></th>
+                            <th class="p-3 text-right">
+                                <span x-text="t('weight')"></span> (<span x-text="labels.weight"></span>)
+                            </th>
+                            <th class="p-3 text-right">
+                                <span x-text="t('arm')"></span> (<span x-text="labels.arm"></span>)
+                            </th>
+                            <th class="p-3 text-right">
+                                <span x-text="t('moment')"></span> (<span x-text="labels.weight"></span>&middot;<span x-text="labels.arm"></span>)
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        <!-- (x ?? 0): an empty numeric input leaves null in the model (Alpine x-model.number) -->
+
+                        <tr class="even:bg-gray-50"><td class="p-3" x-text="t('empty_weight')"></td><td class="p-3 text-right" x-text="(aircraft.weight ?? 0).toFixed(1)"></td><td class="p-3 text-right" x-text="(aircraft.arm ?? 0).toFixed(1)"></td><td class="p-3 text-right" x-text="(aircraft.weight * aircraft.arm).toFixed(1)"></td></tr>
+                        <tr class="even:bg-gray-50"><td class="p-3" x-text="t('pilot')"></td><td class="p-3 text-right" x-text="(load.pilot ?? 0).toFixed(1)"></td><td class="p-3 text-right" x-text="currentArms.pilot.toFixed(1)"></td><td class="p-3 text-right" x-text="(load.pilot * currentArms.pilot).toFixed(1)"></td></tr>
+                        <tr class="even:bg-gray-50"><td class="p-3" x-text="t('copilot')"></td><td class="p-3 text-right" x-text="(load.copilot ?? 0).toFixed(1)"></td><td class="p-3 text-right" x-text="currentArms.copilot.toFixed(1)"></td><td class="p-3 text-right" x-text="(load.copilot * currentArms.copilot).toFixed(1)"></td></tr>
+                        <tr class="even:bg-gray-50"><td class="p-3" x-text="t('baggage')"></td><td class="p-3 text-right" x-text="(load.baggage ?? 0).toFixed(1)"></td><td class="p-3 text-right" x-text="currentArms.baggage.toFixed(1)"></td><td class="p-3 text-right" x-text="(load.baggage * currentArms.baggage).toFixed(1)"></td></tr>
+                        <!-- Fuel and every total below it hold a dash until the tank is declared:
+                             an undeclared tank is not 0 L on board -->
+                        <tr class="even:bg-gray-50 font-medium text-blue-700"><td class="p-3" x-text="t('fuel_usable')"></td><td class="p-3 text-right" x-text="num(fuelResults.weightStart)"></td><td class="p-3 text-right" x-text="currentArms.fuel.toFixed(1)"></td><td class="p-3 text-right" x-text="num(fuelResults.weightStart * currentArms.fuel)"></td></tr>
+
+                        <!-- TOTAL TAKEOFF -->
+                        <tr class="bg-blue-50 font-bold border-t-2 border-blue-200"><td class="p-3" x-text="t('total_to')"></td><td class="p-3 text-right" x-text="num(results.takeoff.weight)"></td><td class="p-3 text-right" x-text="num(results.takeoff.cg)"></td><td class="p-3 text-right" x-text="num(results.takeoff.moment)"></td></tr>
+
+                        <!-- Burned Fuel -->
+                        <tr class="text-red-600 italic">
+                            <td class="p-3" x-text="t('fuel_burned')"></td>
+                            <td class="p-3 text-right" x-text="wbPending ? '---' : '-' + (fuelResults.weightStart - fuelResults.weightEnd).toFixed(1)"></td>
+                            <td class="p-3 text-right" x-text="currentArms.fuel.toFixed(1)"></td>
+                            <td class="p-3 text-right" x-text="wbPending ? '---' : '-' + ((fuelResults.weightStart - fuelResults.weightEnd) * currentArms.fuel).toFixed(1)"></td>
+                        </tr>
+
+                        <!-- TOTAL LANDING -->
+                        <tr class="bg-green-50 font-bold border-t-2 border-green-200">
+                            <td class="p-3" x-text="t('total_ldg')"></td>
+                            <td class="p-3 text-right" x-text="num(results.landing.weight)"></td>
+                            <td class="p-3 text-right" x-text="num(results.landing.cg)"></td>
+                            <td class="p-3 text-right" x-text="num(results.landing.moment)"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <footer class="mt-10 text-center text-sm pb-5">
+            <div class="bg-yellow-50 border border-yellow-300 rounded-lg p-4 shadow-sm mb-4 max-w-4xl mx-auto">
+                <!-- Always visible: not-for-real-use notice + safety warning. The rest is collapsed. -->
+                <p class="text-gray-700 mb-2" x-html="t('footer_disclaimer1')"></p>
+                <p class="text-gray-700 mb-2" x-html="t('footer_disclaimer5')"></p>
+                <details class="mt-3">
+                    <summary class="cursor-pointer text-gray-700 font-bold underline" x-text="t('footer_more')"></summary>
+                    <div class="mt-2 space-y-2">
+                        <p class="text-gray-700" x-html="t('footer_disclaimer2')"></p>
+                        <p class="text-gray-700" x-html="t('footer_disclaimer3')"></p>
+                        <p class="text-gray-700" x-html="t('footer_disclaimer4')"></p>
+                        <p class="text-gray-700" x-html="t('footer_disclaimer6')"></p>
+                    </div>
+                </details>
+            </div>
+            <p class="text-gray-500" x-text="t('footer_copyright')"></p>
+            <p class="text-gray-500" x-text="t('footer_hosting')"></p>
+        </footer>
+    </div>
+
+    <!-- TEST CONTAINER (shown only when test=true) -->
+    <div id="qunit" class="hidden"></div>
+    <div id="qunit-fixture" class="hidden"></div>
+
+    <!-- MAIN LOGIC SCRIPT -->
+    <script>
+        function wbCalculator() {
+            return {
+                lang: 'es', // 'es' or 'en'
+                units: 'metric',
+
+                // Vocabulary
+                vocab: {
+                    es: {
+                        subtitle: 'Peso y balance',
+                        metric: 'Métrico',
+                        imperial: 'Imperial',
+                        sec_aircraft: '1. Avión',
+                        registration: 'Matrícula',
+                        select_plane: 'Seleccioná una matrícula…',
+                        select_prompt: 'Seleccioná una matrícula para calcular',
+                        custom_plane: 'Alpha Trainer personalizado',
+                        reset_button: 'Reiniciar',
+                        age_just_now: 'Ingresaste datos recién',
+                        age_min: 'Ingresaste datos por última vez hace {n} min',
+                        age_hours: 'Ingresaste datos por última vez hace {n} h',
+                        age_day: 'Ingresaste datos por última vez hace {n} día',
+                        age_days: 'Ingresaste datos por última vez hace {n} días',
+                        empty_weight: 'Peso Vacío',
+                        empty_arm: 'Brazo Vacío',
+                        sec_load: '2. Carga (Sec 2.7)',
+                        pilot: 'Piloto',
+                        copilot: 'Co-Piloto',
+                        baggage: 'Equipaje',
+                        alert: '¡ALERTA!',
+                        err_seat_max: 'Máx por asiento excedido',
+                        err_pilot_min: 'Debajo del peso mínimo de piloto',
+                        err_pilot_required: 'Ingresá el peso del piloto',
+                        err_struct_title: 'Error Estructural:',
+                        err_struct_msg: 'Ocupantes exceden',
+                        err_bag_max: 'Máx Equipaje excedido',
+                        sec_perf: '3. Performance',
+                        power_setting: 'Régimen de Potencia',
+                        fuel_start: 'Combustible Inicial',
+                        fuel_usable: 'Combustible Utilizable',
+                        flight_time: 'Tiempo de Vuelo (Hrs)',
+                        fuel_flow: 'Flujo:',
+                        total_cons: 'Consumo Total:',
+                        fuel_rem: 'Remanente:',
+                        est_range: 'Distancia planificada:',
+                        endurance: 'Autonomía inicial teórica:',
+                        endurance_note: '(sin reserva)',
+                        danger: 'PELIGRO',
+                        err_fuel: 'Combustible insuficiente',
+                        results: 'Resultados',
+                        phase: 'Fase',
+                        weight: 'Peso',
+                        arm: 'Brazo',
+                        moment: 'Momento',
+                        status: 'Estado',
+                        status_ok: 'Dentro de límites',
+                        status_limit: 'Fuera de límites',
+                        status_pending: 'Datos incompletos',
+                        sum_weight_to: 'Peso TO',
+                        sum_cg_to: 'CG TO',
+                        sum_cg_ldg: 'CG LDG',
+                        sum_load: 'Carga',
+                        sum_fuel: 'Combustible',
+                        sum_check: 'REVISAR',
+                        sum_pending: 'FALTAN DATOS',
+                        sum_fuel_pending: 'SIN DECLARAR',
+                        fleet_error: 'No hay matrículas cargadas: el archivo de la flota no está configurado o no se pudo leer. Usá el avión personalizado ingresando su peso y brazo vacíos.',
+                        fleet_skipped: 'Se descartaron {n} entradas del archivo de la flota por estar incompletas o mal formadas.',
+                        weighed_on: 'Pesaje del',
+                        weighing_undated: 'Peso vacío sin fecha de pesaje registrada: verificalo contra la documentación vigente del avión.',
+                        limits_from_type: 'Límites de CG tomados del POH del modelo: el manifiesto de peso y balance de este avión no los tiene declarados.',
+                        sum_fuel_warn: 'RESERVA BAJA',
+                        sum_fuel_danger: 'INSUFICIENTE',
+                        phase_to: 'Despegue',
+                        phase_ldg: 'Aterrizaje',
+                        warn_mtom: 'Peso despegue > MTOM',
+                        warn_minw_to: 'Peso despegue < mínimo de vuelo',
+                        warn_minw_ldg: 'Peso aterrizaje < mínimo de vuelo',
+                        warn_cg_to: 'CG despegue fuera de límites',
+                        warn_cg_ldg: 'CG aterrizaje fuera de límites',
+                        envelope: 'Envolvente',
+                        axis_weight: 'Peso',
+                        legend_to: 'Despegue (TO)',
+                        legend_ldg: 'Aterrizaje (LDG)',
+                        legend_invalid: 'rojo = fuera de límites',
+                        legend_envelope: 'recuadro = envolvente (zona válida)',
+                        sec_detail: '4. Detalle de Cálculos',
+                        item: 'Ítem',
+                        total_to: 'TOTAL DESPEGUE',
+                        fuel_burned: 'Combustible Consumido (-)',
+                        total_ldg: 'TOTAL ATERRIZAJE',
+                        warn_fuel_res: 'Reserva final < 30 min',
+                        warn_fuel_unusable: 'Combustible menor o igual al no utilizable',
+                        footer_more: 'Información y limitaciones',
+                        footer_disclaimer1: 'Esta es una herramienta no oficial de terceros solo para fines de demostración y educación.<br>No debe usarse para planificación de vuelo real ni decisiones operacionales.',
+                        footer_disclaimer2: 'Esta herramienta no está afiliada, patrocinada ni respaldada por Pipistrel o su empresa matriz, Textron Aviation.<br>Pipistrel® y Textron Aviation® son marcas registradas de sus respectivos propietarios.<br>Consulte siempre el Manual de Operación del Piloto (POH) oficial y vigente, así como la documentación de peso y balance vigente y la configuración específica de su aeronave.',
+                        footer_disclaimer3: 'Para preguntas sobre entrenamiento o uso operacional, consulte a un instructor de vuelo debidamente habilitado y calificado para instruir en estos tipos/modelos de aeronaves.<br>El uso de esta herramienta es bajo su propia responsabilidad.',
+                        footer_disclaimer4: 'Los tests automatizados se verifican contra el cálculo de ejemplo del POH en la sección 6.2 (C.G. Sample Calculation), usando los valores de entrada/salida publicados como referencia.<br>Los valores del ejemplo se usan únicamente con fines de verificación. Esto no constituye certificación ni aprobación para uso operacional.',
+                        footer_disclaimer5: '<b>ADVERTENCIA DE SEGURIDAD</b>: El uso indebido de herramientas de performance y peso y balance puede contribuir a accidentes que resulten en lesiones graves o muerte, y/o daños a la propiedad.',
+                        footer_disclaimer6: 'Contacto: <a href="mailto:carlosplanchon@cognitialabs.com" class="underline">carlosplanchon@cognitialabs.com</a>',
+                        footer_copyright: 'Copyright © 2025 - Presente, Carlos A. Planchón - Código bajo licencia Apache 2.0.',
+                        footer_hosting: 'Hosteado on-premise en Dolores, Soriano, Uruguay ♥️.'
+                    },
+                    en: {
+                        subtitle: 'Weight & Balance',
+                        metric: 'Metric',
+                        imperial: 'Imperial',
+                        sec_aircraft: '1. Aircraft',
+                        registration: 'Registration',
+                        select_plane: 'Select a registration…',
+                        select_prompt: 'Select a registration to calculate',
+                        custom_plane: 'Custom Alpha Trainer',
+                        reset_button: 'Reset',
+                        age_just_now: 'You entered data just now',
+                        age_min: 'You last entered data {n} min ago',
+                        age_hours: 'You last entered data {n} h ago',
+                        age_day: 'You last entered data {n} day ago',
+                        age_days: 'You last entered data {n} days ago',
+                        empty_weight: 'Empty Weight',
+                        empty_arm: 'Empty Arm',
+                        sec_load: '2. Load (Sec 2.7)',
+                        pilot: 'Pilot',
+                        copilot: 'Co-Pilot',
+                        baggage: 'Baggage',
+                        alert: 'WARNING!',
+                        err_seat_max: 'Seat max exceeded',
+                        err_pilot_min: 'Below the minimum pilot weight',
+                        err_pilot_required: 'Enter the pilot weight',
+                        err_struct_title: 'Structural Error:',
+                        err_struct_msg: 'Occupants exceed',
+                        err_bag_max: 'Max Baggage exceeded',
+                        sec_perf: '3. Performance',
+                        power_setting: 'Power Setting',
+                        fuel_start: 'Start Fuel',
+                        fuel_usable: 'Usable Fuel',
+                        flight_time: 'Flight Time (Hrs)',
+                        fuel_flow: 'Flow:',
+                        total_cons: 'Total Burn:',
+                        fuel_rem: 'Remaining:',
+                        est_range: 'Planned distance:',
+                        endurance: 'Initial theoretical endurance:',
+                        endurance_note: '(no reserve)',
+                        danger: 'DANGER',
+                        err_fuel: 'Insufficient Fuel',
+                        results: 'Results',
+                        phase: 'Phase',
+                        weight: 'Weight',
+                        arm: 'Arm',
+                        moment: 'Moment',
+                        status: 'Status',
+                        status_ok: 'Within limits',
+                        status_limit: 'Out of limits',
+                        status_pending: 'Incomplete data',
+                        sum_weight_to: 'TO Weight',
+                        sum_cg_to: 'TO CG',
+                        sum_cg_ldg: 'LDG CG',
+                        sum_load: 'Load',
+                        sum_fuel: 'Fuel',
+                        sum_check: 'CHECK',
+                        sum_pending: 'MISSING DATA',
+                        sum_fuel_pending: 'NOT SET',
+                        fleet_error: 'No registrations are loaded: the fleet file is not configured or could not be read. Use the custom aircraft and enter its empty weight and arm.',
+                        fleet_skipped: '{n} entries in the fleet file were skipped because they are incomplete or malformed.',
+                        weighed_on: 'Weighed on',
+                        weighing_undated: 'Empty weight with no weighing date on record: check it against the aircraft current documentation.',
+                        limits_from_type: 'CG limits taken from the model POH: this aircraft weight and balance manifest does not state them.',
+                        sum_fuel_warn: 'LOW RESERVE',
+                        sum_fuel_danger: 'INSUFFICIENT',
+                        phase_to: 'Takeoff',
+                        phase_ldg: 'Landing',
+                        warn_mtom: 'Takeoff Weight > MTOM',
+                        warn_minw_to: 'Takeoff weight < min flying weight',
+                        warn_minw_ldg: 'Landing weight < min flying weight',
+                        warn_cg_to: 'Takeoff CG out of limits',
+                        warn_cg_ldg: 'Landing CG out of limits',
+                        envelope: 'Envelope',
+                        axis_weight: 'Weight',
+                        legend_to: 'Takeoff (TO)',
+                        legend_ldg: 'Landing (LDG)',
+                        legend_invalid: 'red = out of limits',
+                        legend_envelope: 'box = envelope (valid zone)',
+                        sec_detail: '4. Calculation Detail',
+                        item: 'Item',
+                        total_to: 'TOTAL TAKEOFF',
+                        fuel_burned: 'Fuel Burned (-)',
+                        total_ldg: 'TOTAL LANDING',
+                        warn_fuel_res: 'Final reserve < 30 min',
+                        warn_fuel_unusable: 'Fuel less than or equal to unusable fuel',
+                        footer_more: 'Information & limitations',
+                        footer_disclaimer1: 'This is an unofficial, third-party tool for demonstration and educational use only.<br>Do not use it for real-world flight planning or operational decisions.',
+                        footer_disclaimer2: 'This tool is not affiliated with, sponsored by, or endorsed by Pipistrel or its parent company, Textron Aviation.<br>Pipistrel® and Textron Aviation® are trademarks of their respective owners.<br>Always consult the current, official Pilot\'s Operating Handbook (POH), as well as the current weight and balance documentation and specific configuration of your aircraft.',
+                        footer_disclaimer3: 'For questions about training or operational use, consult a flight instructor appropriately rated and qualified to instruct in these aircraft types/models.<br>Use at your own risk.',
+                        footer_disclaimer4: 'Automated tests are verified against the POH example calculation in section 6.2 (C.G. Sample Calculation), using the published example input/output values as a reference.<br>Example values are used for verification only. This does not constitute certification or approval for operational use.',
+                        footer_disclaimer5: '<b>SAFETY WARNING</b>: Misuse of performance and weight and balance tools can contribute to accidents resulting in serious injury or death, and/or property damage.',
+                        footer_disclaimer6: 'Contact: <a href="mailto:carlosplanchon@cognitialabs.com" class="underline">carlosplanchon@cognitialabs.com</a>',
+                        footer_copyright: 'Copyright © 2025 - Present, Carlos A. Planchón - Code under the Apache 2.0 license.',
+                        footer_hosting: 'Hosted on-premise in Dolores, Soriano, Uruguay ♥️.'
+                    }
+                },
+
+                // --- AIRCRAFT TYPES (certified data, POH section 2.6) ---
+                // These limits are certified and verified against the handbooks by the
+                // 'POH source data' test module, so they stay in the code. A registration
+                // declares its type and inherits them; it never carries its own limits.
+                // Both types carry the same envelope. The handbooks all define it as
+                // 25 % to 37 % MAC and all print the same conversion,
+                // CG%MAC = 100 x (CGmm - 40) / 900, which puts 25 % at 265 mm and 37 % at
+                // 373 mm. The Trainer handbooks print 265 mm; the PRO prints 267 mm while
+                // its own inches (10 7/16 = 265.1 mm) and its own formula still say 265, so
+                // the 267 looks like a typo carried into the club's checklist. We use 267
+                // for both because it is the more restrictive reading, which is where a
+                // doubtful limit belongs, and because it matches the checklist flown with.
+                // Sources: POH-162-00-40-001 rev. A07 (Alpha Trainer) and
+                // POH-162-00-40-003 rev. B01 (Alpha Trainer PRO), section 6.2.
+                aircraftTypes: {
+                    alpha_trainer: {
+                        name: 'Alpha Trainer',
+                        poh: 'POH-162-00-40-001_A07',
+                        limits: { metric: { fwd: 267, aft: 373 }, imperial: { fwd: 10.5, aft: 14.7 } },
+                        sample: { metric: { weight: 293.6, arm: 254 }, imperial: { weight: 647.6, arm: 10 } }
+                    },
+                    alpha_trainer_pro: {
+                        name: 'Alpha Trainer PRO',
+                        poh: 'POH-162-00-40-003_B01',
+                        limits: { metric: { fwd: 267, aft: 373 }, imperial: { fwd: 10.5, aft: 14.7 } },
+                        sample: { metric: { weight: 308, arm: 254 }, imperial: { weight: 679, arm: 10 } }
+                    }
+                },
+
+                // --- FLEET ---
+                // Starts with the entries that come from the handbooks themselves (a blank
+                // custom aircraft and the two POH 6.2 sample aircraft). Real registrations
+                // are appended by loadFleet() from datasets/fleet.json, because their empty
+                // weight and arm belong to each airframe's weight and balance report, not
+                // to the type: POH 6.2 says as much, and those figures change with every
+                // repaint, instrument change and periodic reweighing.
+                FLEET_URL: 'datasets/fleet.json',
+                fleetStatus: 'idle',   // 'idle' | 'loading' | 'ready' | 'error'
+                fleetSkipped: 0,       // entries the file carried but validation rejected
+                fleet: [
+                    {
+                        id: 'custom',
+                        name: 'Custom',
+                        // Safety default: PRO limits (the more restrictive ones)
+                        limits: { metric: { fwd: 267, aft: 373 }, imperial: { fwd: 10.5, aft: 14.7 } },
+                        data: {
+                            metric: { weight: 308, arm: 254 },
+                            imperial: { weight: 679, arm: 10.0 }
+                        }
+                    },
+                    {
+                        id: 'alpha_trainer_pro',
+                        name: 'Alpha Trainer PRO',
+                        meta: 'POH-162-00-40-003_B01',
+                        limits: { metric: { fwd: 267, aft: 373 }, imperial: { fwd: 10.5, aft: 14.7 } },
+                        data: {
+                            metric: { weight: 308, arm: 254 },
+                            imperial: { weight: 679, arm: 10 }
+                        }
+                    },
+                    {
+                        id: 'alpha_trainer',
+                        name: 'Alpha Trainer',
+                        meta: 'POH-162-00-40-001_A07',
+                        limits: { metric: { fwd: 267, aft: 373 }, imperial: { fwd: 10.5, aft: 14.7 } },
+                        data: {
+                            metric:   {weight: 293.6, arm: 254 },
+                            imperial: { weight: 647.6, arm: 10  }
+                        }
+                    }
+                ],
+                // Ids the file may not claim: they are handbook data, not airframe data
+                RESERVED_IDS: ['custom', 'alpha_trainer', 'alpha_trainer_pro'],
+
+                // No registration by default: results stay hidden until the user picks one
+                selectedPlaneId: '',
+
+                // --- PERSISTENCE (localStorage) ---
+                STORAGE_KEY: 'flight_tools_wb_v1',
+                savedAt: null,        // timestamp of the last real edit (drives the age clock)
+                now: Date.now(),      // ticked by init() so the age label re-renders
+                _persistReady: false,  // update() also runs during init; only user edits save
+                _suppressSave: false,  // reset() calls update(); that save must not happen
+                _suppressTouch: false, // setUnits() converts representation, it is not a data edit
+                perfProfiles: [
+                    { hp: 75, rpm: 5300, lts: 13.6, gal: 3.6, ktas: 104 },
+                    { hp: 65, rpm: 4800, lts: 11.0, gal: 3.0, ktas: 95 },
+                    { hp: 60, rpm: 4500, lts: 10.0, gal: 2.6, ktas: 85 },
+                    { hp: 55, rpm: 4300, lts: 9.0,  gal: 2.4, ktas: 75 }
+                ],
+                selectedPerfIndex: 0,
+                constants: {
+                    metric: {
+                        arms: { pilot: 370, copilot: 370, fuel: 1130, baggage: 930 },
+                        // maxFuelTotal is the TOTAL tank capacity (POH 2.8), not the usable amount:
+                        // 50 L total - 2 L unusable = 48 L usable. The unusable fuel is already part
+                        // of the empty weight (POH 1.7.5), so only the usable part gets loaded here.
+                        limits: { mtom: 550, fwd: 267, aft: 373, minW: 348.5, maxSeat: 110, maxOccupants: 200, minPilot: 55, maxBaggage: 10, maxFuelTotal: 50 },
+                        unusableFuel: 2.0,
+                        fuelDensity: 0.72
+                    },
+                    imperial: {
+                        // 14.5 in: italic arm from POH 6.2 (both manuals), not the rounded conversion of 370 mm (14.6)
+                        arms: { pilot: 14.5, copilot: 14.5, fuel: 44.5, baggage: 36.6 },
+                        // Same contract as the metric block: 13.2 gal total - 0.5 unusable = 12.7 usable.
+                        // These are the values the POH publishes, not conversions of the metric ones.
+                        limits: { mtom: 1212.5, fwd: 10.5, aft: 14.7, minW: 768.31, maxSeat: 242, maxOccupants: 440, minPilot: 121, maxBaggage: 22, maxFuelTotal: 13.2 },
+                        unusableFuel: 0.5,
+                        fuelDensity: 6.0
+                    }
+                },
+                aircraft: { weight: null, arm: null },
+                activeLimits: { fwd: 267, aft: 373 },
+                // Pilot and fuel start empty: forces real data entry (prevents an accidental OK)
+                load: { pilot: null, copilot: 0, baggage: 0 },
+                fuel: { startAmount: null, flightTime: 1.0 },
+                fuelResults: { burnedAmount: 0, remainingAmount: 0, remainingTime: 0, weightStart: 0, weightEnd: 0, rangeNM: 0, enduranceHours: 0, enduranceNM: 0 },
+                results: {
+                    takeoff: { weight: 0, moment: 0, cg: 0, isValid: true },
+                    landing: { weight: 0, moment: 0, cg: 0, isValid: true }
+                },
+
+                get labels() { return this.units === 'metric' ? { weight: 'kg', arm: 'mm', fuel: 'L', flow: 'L/h' } : { weight: 'lbs', arm: 'in', fuel: 'gal', flow: 'GPH' }; },
+                get currentArms() { return this.units === 'metric' ? this.constants.metric.arms : this.constants.imperial.arms; },
+                get currentLimits() {
+                    // Fixed structural constants (MTOM, max seat weight, etc.)
+                    const baseLimits = this.units === 'metric' ? this.constants.metric.limits : this.constants.imperial.limits;
+
+                    // Merge: structural constants + the current aircraft FWD/AFT limits
+                    return {
+                        ...baseLimits,
+                        fwd: this.activeLimits.fwd,
+                        aft: this.activeLimits.aft
+                    };
+                },
+                get currentFuelFlow() { const p = this.perfProfiles[this.selectedPerfIndex]; return this.units === 'metric' ? p.lts : p.gal; },
+                get currentUnusableFuel() { return this.units === 'metric' ? this.constants.metric.unusableFuel : this.constants.imperial.unusableFuel; },
+                // Guarded against null/'' from the empty input: in JS both null >= 0 and null <= 2 are true
+                get fuelBelowUnusable() {
+                    return Number.isFinite(this.fuel.startAmount) && this.fuel.startAmount >= 0 &&
+                           this.fuel.startAmount <= this.currentUnusableFuel;
+                },
+                get planeSelected() { return this.selectedPlaneId !== ''; },
+                get currentPlaneMeta() { const p = this.fleet.find(p => p.id === this.selectedPlaneId); return (p && p.meta) || ''; },
+                // An undeclared tank is not an empty tank: with startAmount pending the
+                // remaining fuel computes to minus one hour of burn, which used to read as
+                // "INSUFFICIENT / DANGER" on a form nobody had filled in yet.
+                get fuelPending() { return !Number.isFinite(this.fuel.startAmount); },
+                // Fuel status light, independent from the W&B state (the table badge is W&B only)
+                get fuelStatus() {
+                    if (this.fuelPending) return 'pending';
+                    if (this.fuelResults.remainingAmount < 0) return 'danger';
+                    if (this.fuelResults.remainingTime < 0.5) return 'warning';
+                    return 'ok';
+                },
+                get fuelSummaryLabel() {
+                    return { pending: this.t('sum_fuel_pending'), danger: this.t('sum_fuel_danger'),
+                             warning: this.t('sum_fuel_warn'), ok: 'OK' }[this.fuelStatus];
+                },
+                get fuelSummaryClass() {
+                    return { pending: 'text-gray-500', danger: 'text-red-600',
+                             warning: 'text-amber-600', ok: 'text-green-600' }[this.fuelStatus];
+                },
+                // Figures that lean on a pending input show a dash instead of a number built
+                // on an implicit 0, the same way the takeoff calculator's format() does.
+                fmt(value, unit, pending) {
+                    return pending ? '---' : value.toFixed(1) + ' ' + unit;
+                },
+                // Bare variant for the results and breakdown tables, where the unit already
+                // lives in the column header. Any figure the fuel feeds into waits with it.
+                num(value) {
+                    return this.wbPending ? '---' : value.toFixed(1);
+                },
+                // A field nobody filled in is not an error, it is a missing input. Keeping
+                // the two apart is what lets the UI say "enter the pilot weight" instead of
+                // "the pilot is below the 55 kg minimum" about a value that was never typed,
+                // and it stops a blank form from painting itself red on load.
+                // Same split the takeoff calculator makes with its 'pending' validity.
+                get dataPending() {
+                    return !Number.isFinite(this.load.pilot)
+                        || !Number.isFinite(this.aircraft.weight)
+                        || !Number.isFinite(this.aircraft.arm);
+                },
+                // Everything the takeoff weight and CG are made of. Fuel is its own input
+                // with its own light, but a takeoff weight computed without a declared tank
+                // is not a takeoff weight: it silently weighs the aircraft with 0 L on board
+                // and can land inside the envelope on paper while the real one sits outside.
+                // So the load light stays about the load, the fuel light about the fuel, and
+                // the W&B figures wait for both.
+                get wbPending() { return this.dataPending || this.fuelPending; },
+                // One gate for every red limit warning in the results panel. They were
+                // gated individually first and the two CG ones got missed, which is exactly
+                // the failure a single flag prevents.
+                get showLimitWarnings() { return !this.wbPending; },
+                // Limits actually broken by values that ARE there. Every other comparison
+                // here is a > against a limit, and null > n is false, so only the minimum
+                // needs the explicit guard.
+                get hasLoadErrors() {
+                    const lim = this.currentLimits;
+                    return (this.load.pilot > lim.maxSeat) ||
+                           (Number.isFinite(this.load.pilot) && this.load.pilot < lim.minPilot) ||
+                           (this.load.copilot > lim.maxSeat) ||
+                           ((this.load.pilot + this.load.copilot) > lim.maxOccupants) || (this.load.baggage > lim.maxBaggage);
+                },
+                // 'pending' | 'limit' | 'ok' for one of the two W&B points (takeoff/landing).
+                // Annunciator colors follow the takeoff calculator: grey while pending, so a
+                // half-filled form never shows a green "within limits" it cannot back up.
+                pointStatus(point) {
+                    if (this.wbPending) return 'pending';
+                    return point.isValid && !this.hasLoadErrors ? 'ok' : 'limit';
+                },
+                statusLabel(point) {
+                    return { ok: this.t('status_ok'), limit: this.t('status_limit'), pending: this.t('status_pending') }[this.pointStatus(point)];
+                },
+                statusTextClass(point) {
+                    return { ok: 'text-green-700', limit: 'text-red-700', pending: 'text-gray-500' }[this.pointStatus(point)];
+                },
+                statusDotClass(point) {
+                    return { ok: 'bg-green-500', limit: 'bg-red-500', pending: 'bg-gray-400' }[this.pointStatus(point)];
+                },
+
+                init() {
+                    if (this.persistenceActive) {
+                        // Real Alpine context: restore the saved session, then enable saves.
+                        const boot = () => {
+                            this.restoreState();
+                            this.update();
+                            this._persistReady = true;
+                            // Re-render the data-age label every 30 s
+                            setInterval(() => { this.now = Date.now(); }, 30000);
+                        };
+                        this.update();
+                        // The fleet has to be in place before restoring: restoreState()
+                        // validates the saved registration against it, so restoring first
+                        // would drop a saved CX-MAC session as if the aircraft were unknown.
+                        // Returned rather than fired and forgotten so the suite can await it;
+                        // Alpine ignores the return value.
+                        return this.loadFleet().then(() => {
+                            // Then nextTick: the x-for options of the registration select
+                            // must exist before x-model can display a restored registration
+                            // (restoring earlier leaves the select showing the wrong plane).
+                            if (typeof this.$nextTick === 'function') this.$nextTick(boot); else boot();
+                        });
+                    }
+                    // Plain factory instance (QUnit): no persistence, no fetch. Tests that
+                    // need a fleet call applyFleetPayload() with their own data.
+                    this.update();
+                    return Promise.resolve();
+                },
+
+                t(key) {
+                    return this.vocab[this.lang][key] || key;
+                },
+
+                setLang(l) {
+                    this.lang = l;
+                    this.drawChart(); // canvas axis titles are not reactive
+                    this.saveState(false);
+                },
+
+                // --- PERSISTENCE, RESET & DATA AGE ---
+                // Active only inside Alpine ($watch exists): plain QUnit factory
+                // instances stay inert unless a test stubs $watch on purpose.
+                get persistenceActive() { return typeof this.$watch === 'function'; },
+                // touch=false persists preferences (lang/units) without refreshing the
+                // age clock: savedAt keeps meaning "last time DATA was entered".
+                saveState(touch = true) {
+                    if (!this.persistenceActive || !this._persistReady || this._suppressSave) return;
+                    if (touch && !this._suppressTouch) this.savedAt = Date.now();
+                    try {
+                        localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+                            v: 1,
+                            savedAt: this.savedAt,
+                            state: {
+                                lang: this.lang,
+                                units: this.units,
+                                selectedPlaneId: this.selectedPlaneId,
+                                selectedPerfIndex: this.selectedPerfIndex,
+                                aircraft: { weight: this.aircraft.weight, arm: this.aircraft.arm },
+                                activeLimits: { fwd: this.activeLimits.fwd, aft: this.activeLimits.aft },
+                                load: { pilot: this.load.pilot, copilot: this.load.copilot, baggage: this.load.baggage },
+                                fuel: { startAmount: this.fuel.startAmount, flightTime: this.fuel.flightTime },
+                            }
+                        }));
+                    } catch (e) { /* private mode / storage full: keep calculating */ }
+                },
+                restoreState() {
+                    if (!this.persistenceActive) return;
+                    let payload = null;
+                    try { payload = JSON.parse(localStorage.getItem(this.STORAGE_KEY)); } catch (e) { return; }
+                    if (!payload || payload.v !== 1 || typeof payload.state !== 'object' || payload.state === null) return;
+                    const s = payload.state;
+                    const finiteOrNull = v => v === null || Number.isFinite(v);
+                    if (['es', 'en'].includes(s.lang)) this.lang = s.lang;
+                    if (['metric', 'imperial'].includes(s.units)) this.units = s.units;
+                    if (s.selectedPlaneId === '' || this.fleet.some(p => p.id === s.selectedPlaneId)) this.selectedPlaneId = s.selectedPlaneId;
+                    if (Number.isInteger(s.selectedPerfIndex) && s.selectedPerfIndex >= 0 && s.selectedPerfIndex < this.perfProfiles.length) this.selectedPerfIndex = s.selectedPerfIndex;
+                    // Raw objects on purpose: loadPlaneData() would wipe a custom aircraft.
+                    // For fleet planes the raw values match what loadPlaneData would set,
+                    // because units is restored along with them.
+                    if (s.aircraft && finiteOrNull(s.aircraft.weight) && finiteOrNull(s.aircraft.arm)) this.aircraft = { weight: s.aircraft.weight, arm: s.aircraft.arm };
+                    if (s.activeLimits && Number.isFinite(s.activeLimits.fwd) && Number.isFinite(s.activeLimits.aft)) this.activeLimits = { fwd: s.activeLimits.fwd, aft: s.activeLimits.aft };
+                    if (s.load && finiteOrNull(s.load.pilot) && Number.isFinite(s.load.copilot) && Number.isFinite(s.load.baggage)) this.load = { pilot: s.load.pilot, copilot: s.load.copilot, baggage: s.load.baggage };
+                    if (s.fuel && finiteOrNull(s.fuel.startAmount) && Number.isFinite(s.fuel.flightTime) && s.fuel.flightTime >= 0) this.fuel = { startAmount: s.fuel.startAmount, flightTime: s.fuel.flightTime };
+                    if (Number.isFinite(payload.savedAt)) this.savedAt = payload.savedAt;
+                },
+                // Clears the saved session and the flight data; lang and units are UI
+                // preferences and survive the reset.
+                reset() {
+                    this._suppressSave = true;
+                    try { localStorage.removeItem(this.STORAGE_KEY); } catch (e) {}
+                    this.savedAt = null;
+                    const fresh = wbCalculator();
+                    this.selectedPlaneId = fresh.selectedPlaneId;
+                    this.selectedPerfIndex = fresh.selectedPerfIndex;
+                    this.aircraft = { ...fresh.aircraft };
+                    this.activeLimits = { ...fresh.activeLimits };
+                    this.load = { ...fresh.load };
+                    this.fuel = { ...fresh.fuel };
+                    this.update();
+                    this._suppressSave = false;
+                },
+                get dataAge() {
+                    return this.savedAt === null ? '' : this.formatAge(this.now - this.savedAt);
+                },
+                // Stale data gets a visual nudge instead of an expiry
+                get dataAgeClass() {
+                    if (this.savedAt === null) return '';
+                    const ms = this.now - this.savedAt;
+                    if (ms >= 24 * 3600 * 1000) return 'text-red-600 font-bold';
+                    if (ms >= 6 * 3600 * 1000) return 'text-amber-600';
+                    return 'text-gray-500';
+                },
+                // This page's t() does not interpolate, so {n} is replaced here
+                formatAge(ms) {
+                    const mins = Math.floor(ms / 60000);
+                    if (mins < 1) return this.t('age_just_now');
+                    if (mins < 60) return this.t('age_min').replace('{n}', mins);
+                    const hours = Math.floor(mins / 60);
+                    if (hours < 24) return this.t('age_hours').replace('{n}', hours);
+                    const days = Math.floor(hours / 24);
+                    return this.t(days === 1 ? 'age_day' : 'age_days').replace('{n}', days);
+                },
+
+                // --- FLEET FILE ---
+                // Validation is deliberately as strict as restoreState()'s: the file sits
+                // outside the code and outside the test suite, so nothing in it is trusted.
+                // A rejected entry is dropped and counted, never repaired with defaults.
+                validateFleetEntry(entry) {
+                    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+                    const id = entry.registration;
+                    if (typeof id !== 'string' || id.trim() === '') return null;
+                    if (this.RESERVED_IDS.includes(id)) return null;          // cannot shadow handbook entries
+                    if (this.fleet.some(p => p.id === id)) return null;       // nor duplicate another registration
+                    const type = this.aircraftTypes[entry.type];
+                    if (!type) return null;                                   // unknown type: no limits to apply
+                    const w = entry.empty_weight, a = entry.empty_arm;
+                    if (!w || !a || typeof w !== 'object' || typeof a !== 'object') return null;
+                    if (!(Number.isFinite(w.kg) && w.kg > 0 && Number.isFinite(w.lbs) && w.lbs > 0)) return null;
+                    if (!(Number.isFinite(a.mm) && a.mm > 0 && Number.isFinite(a.in) && a.in > 0)) return null;
+
+                    // The manifest is the authority on this aircraft's CG limits, so the file
+                    // may state them. Declared limits are checked for internal coherence
+                    // (both unit systems present and agreeing, forward ahead of rearward) and
+                    // rejected as a block if they do not hold, rather than half-applied.
+                    // Omitted, they fall back to the type's published envelope.
+                    const limits = this.validateCgLimits(entry.cg_limits);
+                    if (limits === false) return null;
+
+                    const sn = typeof entry.serial_number === 'string' ? entry.serial_number : '';
+                    const date = typeof entry.weighing_date === 'string' ? entry.weighing_date : null;
+                    return {
+                        id: id,
+                        name: `${id} - ${type.name}`,
+                        meta: sn ? `S/N: ${sn}` : '',
+                        limits: limits || type.limits,
+                        limitsFromManifest: !!limits,
+                        data: {
+                            metric: { weight: w.kg, arm: a.mm },
+                            imperial: { weight: w.lbs, arm: a.in }
+                        },
+                        weighingDate: date,
+                        note: typeof entry.note === 'string' ? entry.note : null
+                    };
+                },
+                // null  -> not declared, inherit from the type
+                // false -> declared but unusable, reject the whole aircraft
+                // object-> usable limits
+                validateCgLimits(raw) {
+                    if (raw === null || raw === undefined) return null;
+                    if (typeof raw !== 'object' || Array.isArray(raw)) return false;
+                    const f = raw.fwd, a = raw.aft;
+                    if (!f || !a || typeof f !== 'object' || typeof a !== 'object') return false;
+                    for (const v of [f.mm, f.in, a.mm, a.in]) {
+                        if (!Number.isFinite(v) || v <= 0) return false;
+                    }
+                    if (f.mm >= a.mm || f.in >= a.in) return false;          // forward must sit ahead of rearward
+                    // The two unit systems have to describe the same envelope: a typo in one
+                    // of them would otherwise pass unnoticed until someone switched units.
+                    if (Math.abs(f.mm / 25.4 - f.in) > 0.1) return false;
+                    if (Math.abs(a.mm / 25.4 - a.in) > 0.1) return false;
+                    return {
+                        metric: { fwd: f.mm, aft: a.mm },
+                        imperial: { fwd: f.in, aft: a.in }
+                    };
+                },
+                // True when the selected aircraft is flying on its type's published envelope
+                // rather than on the one its own manifest states.
+                get currentPlaneLimitsFromType() {
+                    const p = this.fleet.find(p => p.id === this.selectedPlaneId);
+                    if (!p || this.RESERVED_IDS.includes(p.id)) return false;
+                    return !p.limitsFromManifest;
+                },
+                // Split from the fetch so the suite can exercise it without a server
+                applyFleetPayload(payload) {
+                    this.fleet = this.fleet.filter(p => this.RESERVED_IDS.includes(p.id));
+                    this.fleetSkipped = 0;
+                    if (!payload || typeof payload !== 'object' || payload.schema !== 1 || !Array.isArray(payload.aircraft)) {
+                        this.fleetStatus = 'error';
+                        return false;
+                    }
+                    for (const entry of payload.aircraft) {
+                        const plane = this.validateFleetEntry(entry);
+                        if (plane) this.fleet.push(plane); else this.fleetSkipped++;
+                    }
+                    this.fleetStatus = 'ready';
+                    return true;
+                },
+                loadFleet() {
+                    this.fleetStatus = 'loading';
+                    return fetch(this.FLEET_URL, { cache: 'no-cache' })
+                        .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+                        .then(payload => this.applyFleetPayload(payload))
+                        .catch(() => {
+                            // Unreachable, unparseable or malformed: say so instead of
+                            // quietly running on the handbook entries alone.
+                            this.fleet = this.fleet.filter(p => this.RESERVED_IDS.includes(p.id));
+                            this.fleetStatus = 'error';
+                            return false;
+                        });
+                },
+                get fleetFailed() { return this.fleetStatus === 'error'; },
+                // Empty weight has a shelf life: it moves with repaints, instruments and
+                // periodic reweighing. An undated figure cannot be checked against anything.
+                get currentPlaneUndated() {
+                    const p = this.fleet.find(p => p.id === this.selectedPlaneId);
+                    // The handbook entries are samples, not airframes: they need no date
+                    if (!p || this.RESERVED_IDS.includes(p.id)) return false;
+                    return !p.weighingDate;
+                },
+                get currentPlaneWeighingDate() {
+                    const p = this.fleet.find(p => p.id === this.selectedPlaneId);
+                    return (p && p.weighingDate) || '';
+                },
+                get currentPlaneNote() {
+                    const p = this.fleet.find(p => p.id === this.selectedPlaneId);
+                    return (p && p.note) || '';
+                },
+
+                loadPlaneData() {
+                    const plane = this.fleet.find(p => p.id === this.selectedPlaneId);
+                    if (plane) {
+                        // 1. Load the aircraft weight/arm data
+                        const data = this.units === 'metric' ? plane.data.metric : plane.data.imperial;
+                        this.aircraft.weight = data.weight;
+                        this.aircraft.arm = data.arm;
+
+                        // 2. Load the aircraft-specific limits (kept per aircraft: a future type
+                        //    with a different envelope plugs in here)
+                        const limits = this.units === 'metric' ? plane.limits.metric : plane.limits.imperial;
+                        this.activeLimits.fwd = limits.fwd;
+                        this.activeLimits.aft = limits.aft;
+                    }
+                    this.update();
+                },
+
+                // Converts one field, leaving a pending one pending. In JS null * 2.20462
+                // is 0, so converting blindly turned "not entered yet" into a real 0 on
+                // every units switch: the pilot weight stopped asking for a value and
+                // started reading as below the 55 kg minimum, and an untouched tank
+                // reading raised the unusable-fuel alert on its own. The UI tells the two
+                // states apart with Number.isFinite, so the conversion has to as well.
+                toUnit(value, convert, decimals = 2) {
+                    if (!Number.isFinite(value)) return value;
+                    return parseFloat(convert(value).toFixed(decimals));
+                },
+
+                setUnits(newSystem) {
+                    if (this.units === newSystem) return;
+
+                    // Conversion constants
+                    const KG_TO_LBS = 2.20462;
+                    const MM_TO_IN = 1/25.4;
+                    const L_TO_GAL = 0.264172;
+
+                    // 1. Convert the LOAD (pilot, copilot, baggage, fuel)
+                    // (2 decimals: with 1, toggling units repeatedly accumulates rounding drift)
+                    if (newSystem === 'imperial') {
+                        // Metric to imperial
+                        this.load.pilot = this.toUnit(this.load.pilot, v => v * KG_TO_LBS);
+                        this.load.copilot = this.toUnit(this.load.copilot, v => v * KG_TO_LBS);
+                        this.load.baggage = this.toUnit(this.load.baggage, v => v * KG_TO_LBS);
+                        this.fuel.startAmount = this.toUnit(this.fuel.startAmount, v => v * L_TO_GAL);
+                    } else {
+                        // Imperial to metric
+                        this.load.pilot = this.toUnit(this.load.pilot, v => v / KG_TO_LBS);
+                        this.load.copilot = this.toUnit(this.load.copilot, v => v / KG_TO_LBS);
+                        this.load.baggage = this.toUnit(this.load.baggage, v => v / KG_TO_LBS);
+                        this.fuel.startAmount = this.toUnit(this.fuel.startAmount, v => v / L_TO_GAL);
+                    }
+
+                    const plane = this.fleet.find(p => p.id === this.selectedPlaneId);
+
+                    // 2. Convert or load the AIRCRAFT data (empty weight, arm and LIMITS)
+                    if (plane && this.selectedPlaneId !== 'custom') {
+                        // CASE A: predefined aircraft, load the hard data for the new unit system
+                        const newData = newSystem === 'metric' ? plane.data.metric : plane.data.imperial;
+                        const newLimits = newSystem === 'metric' ? plane.limits.metric : plane.limits.imperial;
+
+                        // Update empty weight and arm
+                        this.aircraft.weight = newData.weight;
+                        this.aircraft.arm = newData.arm;
+
+                        // Update the dynamic limits for the new unit system
+                        this.activeLimits.fwd = newLimits.fwd;
+                        this.activeLimits.aft = newLimits.aft;
+
+                    } else {
+                        // CASE B: custom aircraft. The empty weight and arm are the user's
+                        // own figures, so they get converted. The LIMITS are not: the entry
+                        // publishes both unit systems and reading them keeps the envelope on
+                        // the handbook's numbers rather than on a rounded conversion of them.
+                        // Converting handed back 373.1 mm after a metric-imperial-metric
+                        // round trip, a tenth of a millimetre BEHIND the published rearward
+                        // limit. Negligible in size and the wrong direction in principle:
+                        // every other aircraft is judged against published figures, and an
+                        // exception nobody remembers is how a widened envelope survives.
+                        if (newSystem === 'imperial') {
+                            // Metric -> imperial
+                            this.aircraft.weight = this.toUnit(this.aircraft.weight, v => v * KG_TO_LBS);
+                            this.aircraft.arm = this.toUnit(this.aircraft.arm, v => v * MM_TO_IN);
+                        } else {
+                            // Imperial -> metric
+                            this.aircraft.weight = this.toUnit(this.aircraft.weight, v => v / KG_TO_LBS);
+                            this.aircraft.arm = this.toUnit(this.aircraft.arm, v => v / MM_TO_IN, 1);
+                        }
+
+                        const published = plane && (newSystem === 'metric' ? plane.limits.metric : plane.limits.imperial);
+                        if (published) {
+                            this.activeLimits.fwd = published.fwd;
+                            this.activeLimits.aft = published.aft;
+                        } else {
+                            // No aircraft picked yet, so no entry publishes an envelope and
+                            // the pair on screen is all there is. Nothing is judged in this
+                            // state either: dataPending holds the verdict until a registration
+                            // and an empty weight are in.
+                            const convert = newSystem === 'imperial' ? (v => v * MM_TO_IN) : (v => v / MM_TO_IN);
+                            const decimals = newSystem === 'imperial' ? 2 : 1;
+                            this.activeLimits.fwd = this.toUnit(this.activeLimits.fwd, convert, decimals);
+                            this.activeLimits.aft = this.toUnit(this.activeLimits.aft, convert, decimals);
+                        }
+                    }
+
+                    // Update state and recalculate. A units switch converts the
+                    // representation, it is not a data edit: the age clock stays put.
+                    this.units = newSystem;
+                    this._suppressTouch = true;
+                    this.update();
+                    this._suppressTouch = false;
+                },
+
+                update() {
+                    // 1. Total tank capacity: what a full tank reads (POH 2.8)
+                    // Metric: 50 liters. Imperial: 13.2 gallons.
+                    const maxFuelTotal = this.currentLimits.maxFuelTotal;
+
+                    // 2. Input validation (clamping)
+                    if (this.fuel.startAmount < 0) this.fuel.startAmount = 0;
+
+                    // Nothing above the tank capacity can physically be on board.
+                    if (this.fuel.startAmount > maxFuelTotal) {
+                        this.fuel.startAmount = maxFuelTotal;
+                    }
+
+                    if (this.load.pilot < 0) this.load.pilot = 0;
+                    if (this.load.copilot < 0) this.load.copilot = 0;
+                    if (this.load.baggage < 0) this.load.baggage = 0;
+                    // Without this, a negative time "creates" fuel: negative burn, more
+                    // remaining than loaded, and a landing heavier than the takeoff.
+                    if (this.fuel.flightTime < 0) this.fuel.flightTime = 0;
+
+                    // ---------------------------------------------------------
+                    // FUEL LOGIC
+                    // ---------------------------------------------------------
+
+                    // 1. Constants
+                    const flow = this.currentFuelFlow;
+                    const density = this.units === 'metric' ? this.constants.metric.fuelDensity : this.constants.imperial.fuelDensity;
+                    const unusable = this.currentUnusableFuel;
+
+                    // 2. USABLE FUEL (tank reading minus unusable)
+                    // Enter 50 (full tank): usable = 48. Enter 1: usable = 0.
+                    let usableFuelAmount = Math.max(0, this.fuel.startAmount - unusable);
+
+                    // 3. Endurance math based on USABLE fuel
+                    this.fuelResults.burnedAmount = this.fuel.flightTime * flow;
+
+                    // Remaining is measured against usable fuel
+                    this.fuelResults.remainingAmount = usableFuelAmount - this.fuelResults.burnedAmount;
+
+                    // Remaining time
+                    this.fuelResults.remainingTime = flow > 0 ? (this.fuelResults.remainingAmount / flow) : 0;
+
+                    // Planned distance: still-air distance covered in the PLANNED time.
+                    // Not fuel-limited on purpose. It answers "how far does the plan go",
+                    // and the endurance below answers "how far does the fuel reach".
+                    // Clamping this one to the fuel would make it mean two different
+                    // things depending on the fuel state.
+                    const currentProfile = this.perfProfiles[this.selectedPerfIndex];
+                    this.fuelResults.rangeNM = Math.round(currentProfile.ktas * this.fuel.flightTime);
+
+                    // Endurance: what the usable fuel buys, independent of the planned time.
+                    // Empty tank reads 0.0 h / 0 NM, which is what makes the pair honest.
+                    this.fuelResults.enduranceHours = flow > 0 ? usableFuelAmount / flow : 0;
+                    this.fuelResults.enduranceNM = Math.round(currentProfile.ktas * this.fuelResults.enduranceHours);
+
+                    // 4. WEIGHT: only the USABLE fuel weight is added.
+                    // (Unusable fuel weight is already part of the Basic Empty Weight)
+                    this.fuelResults.weightStart = usableFuelAmount * density;
+
+                    // Final weight (usable remaining * density)
+                    const endFuelUsable = Math.max(0, this.fuelResults.remainingAmount);
+                    this.fuelResults.weightEnd = endFuelUsable * density;
+
+                    // ---------------------------------------------------------
+
+                    // W&B points
+                    this.results.takeoff = this.calculatePoint(this.fuelResults.weightStart);
+                    this.results.landing = this.calculatePoint(this.fuelResults.weightEnd);
+
+                    this.drawChart();
+
+                    // update() is the funnel for every user edit (inputs, plane select,
+                    // units), so this is the single save point.
+                    this.saveState();
+                },
+
+                calculatePoint(fuelWeight) {
+                    const arms = this.currentArms, limits = this.currentLimits;
+                    let totalWeight = this.aircraft.weight + this.load.pilot + this.load.copilot + this.load.baggage + fuelWeight;
+                    let totalMoment = (this.aircraft.weight * this.aircraft.arm) + (this.load.pilot * arms.pilot) + (this.load.copilot * arms.copilot) + (this.load.baggage * arms.baggage) + (fuelWeight * arms.fuel);
+                    let cg = totalWeight > 0 ? totalMoment / totalWeight : 0;
+                    return { weight: totalWeight, moment: totalMoment, cg: cg, isValid: totalWeight >= limits.minW && totalWeight <= limits.mtom && cg >= limits.fwd && cg <= limits.aft };
+                },
+                drawChart() {
+                    const canvas = document.getElementById('wbChart'); if (!canvas) return;
+                    const ctx = canvas.getContext('2d'); const w = canvas.width; const h = canvas.height;
+                    ctx.clearRect(0, 0, w, h);
+                    let minX, maxX, stepX, minY, maxY, stepY;
+                    if (this.units === 'metric') { minX = 220; maxX = 400; stepX = 20; minY = 320; maxY = 600; stepY = 20; }
+                    else { minX = 8.5; maxX = 16.0; stepX = 1.0; minY = 700; maxY = 1350; stepY = 100; }
+                    const mapX = (val) => (val - minX) / (maxX - minX) * w; const mapY = (val) => h - ((val - minY) / (maxY - minY) * h);
+                    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1; ctx.beginPath();
+                    for (let x = minX; x <= maxX; x += (stepX/2)) { let px = mapX(x); if (px >= 0 && px <= w) { ctx.moveTo(px, 0); ctx.lineTo(px, h); } }
+                    for (let y = minY; y <= maxY; y += (stepY/2)) { let py = mapY(y); if (py >= 0 && py <= h) { ctx.moveTo(0, py); ctx.lineTo(w, py); } }
+                    ctx.stroke();
+                    ctx.fillStyle = '#9ca3af'; ctx.font = '10px Arial';
+                    for (let x = minX; x <= maxX; x += stepX) { ctx.fillText(Math.round(x*10)/10, mapX(x) + 2, h - 5); }
+                    for (let y = minY; y <= maxY; y += stepY) { const py = mapY(y); if (py > 26) ctx.fillText(Math.round(y), 5, py - 2); }
+                    // Envelope = VALID zone: neutral border + faint green fill.
+                    // Red is reserved for out-of-limits points (POH chart convention).
+                    const lim = this.currentLimits;
+                    const envLeft = mapX(lim.fwd), envRight = mapX(lim.aft), envTop = mapY(lim.mtom), envBottom = mapY(lim.minW);
+                    ctx.fillStyle = 'rgba(22, 163, 74, 0.08)';
+                    ctx.fillRect(envLeft, envTop, envRight - envLeft, envBottom - envTop);
+                    ctx.strokeStyle = '#475569'; ctx.lineWidth = 2;
+                    ctx.strokeRect(envLeft, envTop, envRight - envLeft, envBottom - envTop);
+                    // Axis titles (translated; setLang() redraws the canvas)
+                    ctx.fillStyle = '#475569'; ctx.font = 'bold 11px Arial';
+                    ctx.fillText(this.t('axis_weight') + ' (' + this.labels.weight + ')', 5, 14);
+                    ctx.textAlign = 'right';
+                    ctx.fillText('CG (' + this.labels.arm + ')', w - 6, h - 18);
+                    ctx.textAlign = 'left';
+
+                    // Empty envelope while an input is pending: a dot plotted from a missing
+                    // empty weight, pilot or tank reading lands wherever the implicit zeros
+                    // put it, and inside the envelope it reads as a cleared flight.
+                    if (this.wbPending) {
+                        ctx.fillStyle = '#6b7280'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+                        ctx.fillText(this.t('status_pending'), w / 2, h / 2);
+                        ctx.textAlign = 'left';
+                        return;
+                    }
+                    const drawPoint = (cg, weight, isValid, validColor, label) => { const x = mapX(cg); const y = mapY(weight); ctx.fillStyle = isValid ? validColor : '#dc2626'; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#000'; ctx.font = 'bold 11px Arial'; ctx.fillText(label, x + 8, y + 3); };
+                    const toX = mapX(this.results.takeoff.cg), toY = mapY(this.results.takeoff.weight), lndX = mapX(this.results.landing.cg), lndY = mapY(this.results.landing.weight);
+                    ctx.strokeStyle = '#6b7280'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(toX, toY); ctx.lineTo(lndX, lndY); ctx.stroke();
+                    drawPoint(this.results.takeoff.cg, this.results.takeoff.weight, this.results.takeoff.isValid, '#2563eb', 'TO'); drawPoint(this.results.landing.cg, this.results.landing.weight, this.results.landing.isValid, '#16a34a', 'LDG');
+                }
+            }
+        }
+
+        // --- TEST LOADER LOGIC ---
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('test') === 'true') {
+                document.getElementById('main-app').style.display = 'none';
+                document.body.style.backgroundColor = 'white';
+                document.getElementById('qunit').classList.remove('hidden');
+                document.getElementById('qunit-fixture').classList.remove('hidden');
+
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'assets/qunit-2.26.0.css';
+                document.head.appendChild(link);
+
+                const script = document.createElement('script');
+                script.src = 'assets/qunit-2.26.0.js';
+                script.onload = function() {
+
+                    QUnit.assert.closeTo = function(actual, expected, tolerance, message) {
+                        const diff = Math.abs(actual - expected);
+                        this.pushResult({
+                            result: diff <= tolerance,
+                            actual: actual,
+                            expected: `approx ${expected} (+/- ${tolerance})`,
+                            message: message
+                        });
+                    };
+
+                    QUnit.module('Pipistrel Alpha W&B Calculator', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() {
+                            vm = wbCalculator();
+                            vm.init();
+                        });
+
+                        QUnit.test('Default initialization (metric)', function(assert) {
+                            assert.equal(vm.units, 'metric', 'Metric units by default');
+                            assert.equal(vm.selectedPlaneId, '', 'No registration selected by default');
+                            assert.false(vm.planeSelected, 'planeSelected false until a registration is picked');
+                            assert.equal(vm.load.pilot, null, 'Pilot starts empty (no accidental OK)');
+                            vm.selectedPlaneId = 'custom';
+                            vm.loadPlaneData();
+                            assert.equal(vm.aircraft.weight, 308, 'Custom loads the default empty weight');
+                            assert.equal(vm.aircraft.arm, 254, 'Custom loads the default empty arm');
+                        });
+
+                        QUnit.test('Selecting an aircraft loads its weight and limits', function(assert) {
+                            // Deliberately one of the two POH sample aircraft rather than a
+                            // registration: a test should not stop working because the club
+                            // sold an aeroplane. Registrations are covered by the fleet module.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            assert.equal(vm.aircraft.weight, 308, 'PRO sample weight loaded (kg)');
+                            assert.equal(vm.aircraft.arm, 254, 'PRO sample arm loaded (mm)');
+                            assert.equal(vm.activeLimits.fwd, 267, 'And the PRO forward limit');
+
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            assert.equal(vm.aircraft.weight, 293.6, 'Trainer sample weight loaded (kg)');
+                            assert.equal(vm.activeLimits.fwd, 267, 'And the same forward limit: both types share the envelope');
+                        });
+
+                        QUnit.test('Basic CG calculation (metric)', function(assert) {
+                            vm.aircraft.weight = 300; vm.aircraft.arm = 250;
+                            vm.load.pilot = 80; // Arm 370
+                            vm.fuel.startAmount = 0;
+                            vm.update();
+                            // Total weight = 380, moment = 104600, CG = 275.263
+                            assert.equal(vm.results.takeoff.weight, 380, 'Total weight correct');
+                            assert.closeTo(vm.results.takeoff.moment, 104600, 1, 'Total moment correct');
+                            assert.closeTo(vm.results.takeoff.cg, 275.3, 0.1, 'CG computed correctly');
+                        });
+
+                        QUnit.test('Limit validations (Sec 2.7)', function(assert) {
+                            vm.load.pilot = 120;
+                            assert.true(vm.hasLoadErrors, 'Detects error: pilot above 110 kg');
+                            vm.load.pilot = 40;
+                            assert.true(vm.hasLoadErrors, 'Detects error: pilot below 55 kg');
+                            vm.load.pilot = 80;
+                            vm.load.copilot = 0;
+                            assert.false(vm.hasLoadErrors, 'No errors with a normal load');
+                        });
+
+                        QUnit.test('Unit conversion to imperial', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.setUnits('imperial');
+                            assert.equal(vm.units, 'imperial');
+                            // The published pound figure for the type, not a conversion of the
+                            // kilogram one: the POH prints both and they are what gets loaded.
+                            assert.equal(vm.aircraft.weight, 647.6, 'Weight loaded in pounds correctly');
+                            assert.equal(vm.aircraft.arm, 10, 'Arm loaded in inches correctly');
+                            assert.equal(vm.currentLimits.mtom, 1212.5, 'MTOM limit updated to pounds');
+                        });
+
+                        QUnit.test('Performance and fuel burn', function(assert) {
+                            vm.fuel.startAmount = 50;
+                            vm.selectedPerfIndex = 0;
+                            vm.fuel.flightTime = 2.0;
+                            vm.update();
+                            assert.closeTo(vm.fuelResults.burnedAmount, 27.2, 0.1, 'Fuel burn correct (13.6 * 2)');
+                            assert.closeTo(vm.fuelResults.remainingAmount, 20.8, 0.1, 'Remaining correct (50 total - 2 unusable - 27.2 burned)');
+                        });
+
+                        QUnit.test('Fuel status light (independent from W&B)', function(assert) {
+                            vm.selectedPerfIndex = 0; // 13.6 L/h
+                            vm.fuel.flightTime = 1.0;
+                            vm.fuel.startAmount = 10; vm.update();
+                            assert.equal(vm.fuelStatus, 'danger', '8 L usable minus 13.6 L burn: insufficient');
+                            vm.fuel.startAmount = 20; vm.update();
+                            assert.equal(vm.fuelStatus, 'warning', '4.4 L remaining: reserve under 30 min');
+                            vm.fuel.startAmount = 40; vm.update();
+                            assert.equal(vm.fuelStatus, 'ok', '24.4 L remaining: OK');
+                        });
+
+                        QUnit.test('An undeclared tank is not an empty tank', function(assert) {
+                            // With startAmount pending the burn still computes, so the remaining
+                            // fuel went negative and the light screamed INSUFFICIENT / DANGER
+                            // before anyone had said how much fuel was on board.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.fuel.flightTime = 1.0;
+                            vm.update();
+                            assert.true(vm.fuelPending, 'Tank reading pending');
+                            assert.equal(vm.fuelStatus, 'pending', 'Light reads pending, not danger');
+                            assert.equal(vm.fuelSummaryClass, 'text-gray-500', 'Grey, not red');
+                            assert.equal(vm.fuelSummaryLabel, vm.t('sum_fuel_pending'), 'And says so');
+
+                            // Declaring an actually empty tank IS a danger
+                            vm.fuel.startAmount = 0; vm.update();
+                            assert.false(vm.fuelPending, '0 L is a declared amount');
+                            assert.equal(vm.fuelStatus, 'danger', '0 L against a 1 h plan: insufficient');
+
+                            vm.fuel.startAmount = 40; vm.update();
+                            assert.equal(vm.fuelStatus, 'ok', '40 L against a 1 h plan: fine');
+                        });
+
+                        QUnit.test('Pending figures show a dash instead of a number built on 0', function(assert) {
+                            assert.equal(vm.fmt(419.4, 'kg', true), '---', 'Pending shows a dash');
+                            assert.equal(vm.fmt(419.4, 'kg', false), '419.4 kg', 'Otherwise the value and its unit');
+
+                            // num() reads wbPending itself: the tables carry the unit in the header
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 80;
+                            vm.update();
+                            assert.true(vm.wbPending, 'Tank still undeclared');
+                            assert.equal(vm.num(419.4), '---', 'Table cells hold a dash too');
+                            vm.fuel.startAmount = 40; vm.update();
+                            assert.equal(vm.num(419.4), '419.4', 'And show the figure once the tank is declared');
+                        });
+
+                        QUnit.test('Full tank matches the POH usable fuel (Sec 2.8)', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.fuel.startAmount = 999; vm.fuel.flightTime = 0;
+                            vm.update();
+                            assert.equal(vm.fuel.startAmount, 50, 'Clamped to the 50 L total capacity');
+                            assert.closeTo(vm.fuelResults.remainingAmount, 48, 0.01, 'Usable fuel 48 L');
+                            // POH publishes 34.5 kg; 48 * 0.72 = 34.56 (the POH rounds loosely here)
+                            assert.closeTo(vm.fuelResults.weightStart, 34.56, 0.01, 'Full tank adds 34.56 kg');
+                            vm.setUnits('imperial');
+                            vm.fuel.startAmount = 999; vm.update();
+                            assert.equal(vm.fuel.startAmount, 13.2, 'Clamped to 13.2 gal total capacity');
+                            assert.closeTo(vm.fuelResults.remainingAmount, 12.7, 0.01, 'Usable fuel 12.7 gal');
+                            assert.closeTo(vm.fuelResults.weightStart, 76.2, 0.05, 'Full tank adds 76.2 lbs (POH 76)');
+                        });
+
+                        QUnit.test('Empty fuel field does not raise the unusable alert', function(assert) {
+                            assert.false(vm.fuelBelowUnusable, 'Empty field (null): no alert');
+                            vm.fuel.startAmount = 0;   assert.true(vm.fuelBelowUnusable, '0 L: alert');
+                            vm.fuel.startAmount = 2;   assert.true(vm.fuelBelowUnusable, 'Exactly the unusable amount: alert');
+                            vm.fuel.startAmount = 2.1; assert.false(vm.fuelBelowUnusable, 'Above unusable: no alert');
+                        });
+
+                        QUnit.test('A units switch does not fill the pending fields with 0', function(assert) {
+                            // null * 2.20462 is 0, so the switch used to turn every pending
+                            // field into a confirmed 0: the pilot weight went from "required"
+                            // to "below the minimum" and an untouched tank raised the
+                            // unusable-fuel alert without the user entering anything.
+                            vm.selectedPlaneId = 'custom';
+                            vm.loadPlaneData();
+                            vm.load.copilot = 70;   // entered on purpose, must still convert
+
+                            vm.setUnits('imperial');
+                            assert.strictEqual(vm.load.pilot, null, 'Pilot still pending in imperial');
+                            assert.strictEqual(vm.fuel.startAmount, null, 'Fuel still pending in imperial');
+                            assert.false(vm.fuelBelowUnusable, 'A pending tank raises no unusable-fuel alert');
+                            assert.closeTo(vm.load.copilot, 154.32, 0.01, 'The field that does hold a value still converts');
+
+                            vm.setUnits('metric');
+                            assert.strictEqual(vm.load.pilot, null, 'Pilot still pending back in metric');
+                            assert.strictEqual(vm.fuel.startAmount, null, 'Fuel still pending back in metric');
+                            assert.closeTo(vm.load.copilot, 70, 0.01, 'Round trip returns the entered value');
+                        });
+
+                        QUnit.test('Pending data is not a limit error', function(assert) {
+                            // A blank form used to read as "pilot below the 55 kg minimum",
+                            // painting the summary and both status cells red before anyone
+                            // had typed a thing. null < 55 is true in JS.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            assert.true(vm.dataPending, 'Pilot never entered: data still pending');
+                            assert.false(vm.hasLoadErrors, 'A pending pilot is not a limit error');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'pending', 'Takeoff cell reads pending');
+                            assert.equal(vm.statusLabel(vm.results.takeoff), vm.t('status_pending'), 'And says so');
+
+                            // A real value below the minimum IS an error
+                            vm.load.pilot = 40; vm.fuel.startAmount = 40; vm.update();
+                            assert.false(vm.dataPending, 'Pilot entered: nothing pending');
+                            assert.true(vm.hasLoadErrors, '40 kg is below the 55 kg minimum');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'Takeoff cell reads out of limits');
+
+                            // A sane load clears both
+                            vm.load.pilot = 80; vm.update();
+                            assert.false(vm.dataPending, 'Nothing pending');
+                            assert.false(vm.hasLoadErrors, 'No limit errors');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'ok', 'Takeoff cell reads within limits');
+                        });
+
+                        QUnit.test('No W&B verdict until the tank is declared', function(assert) {
+                            // A takeoff weight computed with an undeclared tank weighs the
+                            // aircraft with 0 L on board: it can sit inside the envelope on
+                            // screen while the real one, fuelled, sits outside it.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 80;
+                            vm.update();
+                            assert.false(vm.dataPending, 'The load itself is complete');
+                            assert.false(vm.hasLoadErrors, 'And it breaks no limit');
+                            assert.true(vm.fuelPending, 'But the tank was never declared');
+                            assert.true(vm.wbPending, 'So the W&B figures are not knowable yet');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'pending', 'No green verdict on the takeoff point');
+                            assert.equal(vm.pointStatus(vm.results.landing), 'pending', 'Nor on the landing point');
+
+                            // Declaring the tank, even at 0, is what makes the verdict real
+                            vm.fuel.startAmount = 0; vm.update();
+                            assert.false(vm.wbPending, 'A declared tank completes the picture');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'ok', 'Now the verdict stands');
+                        });
+
+                        QUnit.test('No red limit warning while anything is pending', function(assert) {
+                            // Every warning in the results panel hangs off this one flag, so a
+                            // new one cannot be added without the pending check. Missing inputs
+                            // must never produce "CG out of limits" about a CG nobody has.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            assert.false(vm.showLimitWarnings, 'Nothing entered: no warnings');
+                            vm.load.pilot = 80; vm.update();
+                            assert.false(vm.showLimitWarnings, 'Tank still undeclared: still none');
+                            vm.fuel.startAmount = 40; vm.update();
+                            assert.true(vm.showLimitWarnings, 'Complete data: warnings can speak');
+                            vm.aircraft.weight = null; vm.update();
+                            assert.false(vm.showLimitWarnings, 'Empty weight cleared: silent again');
+                        });
+
+                        QUnit.test('An empty aircraft weight or arm keeps the status pending', function(assert) {
+                            // Custom lets both fields be cleared, and calculatePoint() would
+                            // treat the blanks as 0: a CG built on a missing empty weight must
+                            // not show up as a green "within limits".
+                            vm.selectedPlaneId = 'custom';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 80; vm.fuel.startAmount = 40; vm.update();
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'ok', 'Complete data: within limits');
+
+                            vm.aircraft.weight = null; vm.update();
+                            assert.true(vm.dataPending, 'Empty weight leaves the status pending');
+                            assert.equal(vm.statusDotClass(vm.results.takeoff), 'bg-gray-400', 'Grey dot, not green or red');
+
+                            vm.aircraft.weight = 308; vm.aircraft.arm = null; vm.update();
+                            assert.true(vm.dataPending, 'Empty arm leaves the status pending too');
+                        });
+
+                        QUnit.test('An aircraft with no registration picked keeps its data pending', function(assert) {
+                            // Same trap on the aircraft block: with no plane selected the
+                            // switch takes the custom branch and converts null weight/arm.
+                            assert.strictEqual(vm.selectedPlaneId, '', 'No registration picked');
+                            vm.setUnits('imperial');
+                            assert.strictEqual(vm.aircraft.weight, null, 'Empty weight stays pending');
+                            assert.strictEqual(vm.aircraft.arm, null, 'Empty arm stays pending');
+                        });
+
+                        QUnit.test('Negative flight time clamps to 0 (no phantom fuel)', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 80;
+                            vm.fuel.startAmount = 40;
+                            vm.fuel.flightTime = -1;
+                            vm.update();
+                            assert.equal(vm.fuel.flightTime, 0, 'Negative time ends up as 0');
+                            assert.equal(vm.fuelResults.burnedAmount, 0, 'Zero burn, never negative');
+                            assert.closeTo(vm.fuelResults.remainingAmount, 38, 0.01, 'Remaining equals usable, no phantom fuel');
+                            assert.equal(vm.fuelResults.rangeNM, 0, 'Distance 0, not negative');
+                            assert.closeTo(vm.results.landing.weight, vm.results.takeoff.weight, 0.001, 'Lands at the same weight it took off');
+                        });
+
+                        // ------------------------------------------------------------------
+                        // Planned distance vs. endurance: the two answer different questions
+                        // and must not be conflated. Planned distance follows the planned
+                        // time; endurance follows the usable fuel.
+                        // ------------------------------------------------------------------
+                        QUnit.test('Endurance comes from the usable fuel, not the planned time', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.selectedPerfIndex = 0; // 75% HP: 13.6 L/h, 104 KTAS
+                            vm.fuel.startAmount = 50; // Full tank: 48 L usable
+                            vm.fuel.flightTime = 1.0;
+                            vm.update();
+                            assert.closeTo(vm.fuelResults.enduranceHours, 3.53, 0.01, '48 L / 13.6 L/h = 3.53 h');
+                            assert.equal(vm.fuelResults.enduranceNM, 367, '104 KTAS * 3.53 h = 367 NM');
+                            assert.equal(vm.fuelResults.rangeNM, 104, 'Planned distance follows the planned time');
+
+                            // Moving the planned time must not move the endurance
+                            vm.fuel.flightTime = 3.0;
+                            vm.update();
+                            assert.closeTo(vm.fuelResults.enduranceHours, 3.53, 0.01, 'Endurance unchanged by the planned time');
+                            assert.equal(vm.fuelResults.rangeNM, 312, 'Planned distance tracks the new planned time');
+                        });
+
+                        QUnit.test('Empty fuel field: 0 endurance behind a 104 NM plan', function(assert) {
+                            // Default state: empty fuel field, 1.0 h planned at 75% HP
+                            assert.equal(vm.fuelResults.rangeNM, 104, 'The plan still asks for 104 NM');
+                            assert.equal(vm.fuelResults.enduranceHours, 0, 'No fuel: 0 h endurance');
+                            assert.equal(vm.fuelResults.enduranceNM, 0, 'No fuel: 0 NM reachable');
+                        });
+
+                        QUnit.test('Endurance when the fuel falls short of the plan', function(assert) {
+                            vm.selectedPerfIndex = 0;
+                            vm.fuel.startAmount = 10; // 8 L usable
+                            vm.fuel.flightTime = 1.0;
+                            vm.update();
+                            assert.closeTo(vm.fuelResults.enduranceHours, 0.588, 0.001, '8 L / 13.6 L/h = 0.59 h');
+                            assert.equal(vm.fuelResults.enduranceNM, 61, 'Only 61 NM reachable against a 104 NM plan');
+                            assert.equal(vm.fuelStatus, 'danger', 'The danger light already covers the shortfall');
+                        });
+
+                        // ------------------------------------------------------------------
+                        // POH Section 6.2 (C.G. Sample Calculation): reproduces the published
+                        // arithmetic of the worked example.
+                        // The example loads 36 kg / 79 lbs of fuel, which is the TOTAL tank
+                        // capacity (POH 2.8: 50 L = 36 kg). That is not a reachable loading:
+                        // the empty weight already includes the 2 L of unusable fuel (POH 1.7.5),
+                        // so a full tank only adds the 48 L usable = 34.56 kg. The POH itself
+                        // notes the 6.2 values are "for illustration purposes only", so the fuel
+                        // weight goes straight into calculatePoint() to check the published
+                        // moment/CG math. The tank model is covered by the full tank test above.
+                        // Tolerances: half of the last digit published by the POH.
+                        // ------------------------------------------------------------------
+
+                        QUnit.test('POH 6.2 Alpha Trainer (POH-162-00-40-001_A07) - Metric', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 70; vm.load.copilot = 80; vm.load.baggage = 10;
+                            const point = vm.calculatePoint(36);
+                            assert.closeTo(point.weight, 489.6, 0.05, 'Total weight 489.6 kg');
+                            assert.closeTo(point.moment, 180054.4, 0.5, 'Total moment 180054.4 kg·mm');
+                            assert.closeTo(point.cg, 367.8, 0.05, 'CG 367.8 mm');
+                            assert.true(point.isValid, 'Inside the envelope (Sec 6.3)');
+                        });
+
+                        QUnit.test('POH 6.2 Alpha Trainer (POH-162-00-40-001_A07) - Imperial', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            vm.setUnits('imperial');
+                            vm.load.pilot = 154; vm.load.copilot = 176; vm.load.baggage = 22;
+                            const point = vm.calculatePoint(79);
+                            assert.closeTo(point.weight, 1078.6, 0.05, 'Total weight 1078.6 lbs');
+                            assert.closeTo(point.moment, 15581.7, 0.5, 'Total moment 15581.7 lbs·in');
+                            assert.closeTo(point.cg, 14.4, 0.05, 'CG 14.4 in');
+                            assert.true(point.isValid, 'Inside the envelope (Sec 6.3)');
+                        });
+
+                        QUnit.test('POH 6.2 Alpha Trainer PRO (POH-162-00-40-003_B01) - Metric', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 70; vm.load.copilot = 80; vm.load.baggage = 10;
+                            const point = vm.calculatePoint(36);
+                            assert.closeTo(point.weight, 504, 0.05, 'Total weight 504 kg');
+                            assert.closeTo(point.moment, 183712, 0.5, 'Total moment 183712 kg·mm');
+                            assert.closeTo(point.cg, 364.5, 0.05, 'CG 364.5 mm');
+                            assert.true(point.isValid, 'Inside the envelope (Sec 6.3)');
+                        });
+
+                        QUnit.test('POH 6.2 Alpha Trainer PRO (POH-162-00-40-003_B01) - Imperial', function(assert) {
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.setUnits('imperial');
+                            vm.load.pilot = 154; vm.load.copilot = 176; vm.load.baggage = 22;
+                            const point = vm.calculatePoint(79);
+                            assert.closeTo(point.weight, 1110, 0.05, 'Total weight 1110 lbs');
+                            assert.closeTo(point.moment, 15895.7, 0.5, 'Total moment 15895.7 lbs·in');
+                            assert.closeTo(point.cg, 14.3, 0.05, 'CG 14.3 in');
+                            assert.true(point.isValid, 'Inside the envelope (Sec 6.3)');
+                        });
+                    });
+
+                    // Deterministic grid sweeps over the supported ranges and their boundaries.
+                    // They pin down the SHAPE of the calculation (conservation, monotonicity,
+                    // identities) rather than single worked examples: the POH tests above check
+                    // that individual points are right, these check the relationships those
+                    // points have to obey. A grid over continuous inputs is still a finite
+                    // sample of them; what it buys over random draws is landing on the
+                    // boundaries on purpose and stating in the code which points it visits.
+                    // Fixed spacing, no random seeds, so a failure here always reproduces.
+                    // Sections 2.6, 2.7, 2.8 and 6.2 of POH-162-00-40-001 rev. A07 (Alpha
+                    // Trainer) and POH-162-00-40-003 rev. B01 (Trainer PRO), written out
+                    // here so every constant can be checked against its handbook.
+                    // Same reasoning as the takeoff calculator's POH module: the invariants
+                    // only catch a constant that breaks a relationship, so a limit mistyped
+                    // into a value that is still plausible passes everything else. Editing a
+                    // constant without editing this block fails the suite.
+                    // The fleet file lives outside the code and outside this suite, so it is
+                    // treated like the localStorage payload: nothing in it is trusted, a bad
+                    // entry is dropped rather than repaired, and a file that cannot be read
+                    // leaves the calculator usable and saying why.
+                    QUnit.module('Fleet file (datasets/fleet.json)', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() { vm = wbCalculator(); vm.init(); });
+
+                        const entry = (over = {}) => Object.assign({
+                            registration: 'CX-TST', type: 'alpha_trainer',
+                            empty_weight: { kg: 300, lbs: 661.4 },
+                            empty_arm: { mm: 260, in: 10.2 },
+                            serial_number: '1234 AT 912 LSA', weighing_date: '2026-01-15', note: null
+                        }, over);
+                        const payload = (...entries) => ({ schema: 1, aircraft: entries });
+
+                        QUnit.test('The handbook entries are there before any file loads', function(assert) {
+                            assert.deepEqual(vm.fleet.map(p => p.id), ['custom', 'alpha_trainer_pro', 'alpha_trainer'],
+                                'Custom and the two POH sample aircraft come from the code');
+                            assert.equal(vm.fleetStatus, 'idle', 'No file read yet');
+                        });
+
+                        QUnit.test('A valid entry is added with the limits of its type', function(assert) {
+                            assert.true(vm.applyFleetPayload(payload(entry())), 'Payload accepted');
+                            assert.equal(vm.fleetStatus, 'ready');
+                            const p = vm.fleet.find(p => p.id === 'CX-TST');
+                            assert.equal(p.name, 'CX-TST - Alpha Trainer', 'Name built from registration and type');
+                            assert.equal(p.meta, 'S/N: 1234 AT 912 LSA', 'Serial number carried through');
+                            assert.deepEqual(p.data.metric, { weight: 300, arm: 260 }, 'Empty weight and arm from the file');
+                            // The point of the split: limits are the type's, not the file's
+                            assert.deepEqual(p.limits, vm.aircraftTypes.alpha_trainer.limits, 'Limits come from the POH type');
+                            assert.equal(p.limits.metric.fwd, 267, 'The type forward limit, not whatever the file says');
+                        });
+
+                        QUnit.test('An aircraft can carry the CG limits of its manifest', function(assert) {
+                            // The manifest, not the handbook, is the authority on a given
+                            // airframe's limits. Declared here, they win over the type envelope.
+                            vm.applyFleetPayload(payload(entry({
+                                cg_limits: { fwd: { mm: 270, in: 10.63 }, aft: { mm: 370, in: 14.57 } }
+                            })));
+                            const p = vm.fleet.find(p => p.id === 'CX-TST');
+                            assert.deepEqual(p.limits.metric, { fwd: 270, aft: 370 }, 'Manifest limits applied');
+                            assert.deepEqual(p.limits.imperial, { fwd: 10.63, aft: 14.57 }, 'In both unit systems');
+                            assert.true(p.limitsFromManifest, 'Flagged as coming from the manifest');
+                            vm.selectedPlaneId = 'CX-TST';
+                            vm.loadPlaneData();
+                            assert.equal(vm.activeLimits.fwd, 270, 'And they are what the calculator uses');
+                            assert.false(vm.currentPlaneLimitsFromType, 'No fallback warning for this aircraft');
+                        });
+
+                        QUnit.test('Without declared limits the type envelope is used, and flagged', function(assert) {
+                            vm.applyFleetPayload(payload(entry()));   // no cg_limits
+                            const p = vm.fleet.find(p => p.id === 'CX-TST');
+                            assert.deepEqual(p.limits, vm.aircraftTypes.alpha_trainer.limits, 'Falls back to the type');
+                            assert.false(p.limitsFromManifest, 'And is not claimed as manifest data');
+                            vm.selectedPlaneId = 'CX-TST';
+                            assert.true(vm.currentPlaneLimitsFromType, 'The UI can say the manifest did not state them');
+                            // The POH sample aircraft are type data by definition, no warning
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            assert.false(vm.currentPlaneLimitsFromType, 'Sample aircraft are not flagged');
+                        });
+
+                        QUnit.test('Incoherent declared limits reject the whole aircraft', function(assert) {
+                            // Half-applying a limit is worse than not applying it, so a bad
+                            // block takes the aircraft with it rather than quietly falling back
+                            // to the type and looking like it worked.
+                            const bad = [
+                                { fwd: { mm: 380, in: 14.96 }, aft: { mm: 370, in: 14.57 } },   // forward behind rearward
+                                { fwd: { mm: 267, in: 10.5 }, aft: { mm: 373, in: 20 } },       // inches disagree with mm
+                                { fwd: { mm: 300, in: 10.5 }, aft: { mm: 373, in: 14.7 } },     // mm disagree with inches
+                                { fwd: { mm: -267, in: -10.5 }, aft: { mm: 373, in: 14.7 } },   // negative
+                                { fwd: { mm: 0, in: 0 }, aft: { mm: 373, in: 14.7 } },          // zero
+                                { fwd: { mm: 267 }, aft: { mm: 373, in: 14.7 } },               // missing inches
+                                { fwd: { mm: 'forward', in: 10.5 }, aft: { mm: 373, in: 14.7 } }, // not numbers
+                                { aft: { mm: 373, in: 14.7 } },                                 // missing forward
+                                'limits', 42, []
+                            ];
+                            for (const cg of bad) {
+                                vm.applyFleetPayload(payload(entry({ cg_limits: cg })));
+                                assert.equal(vm.fleet.filter(p => p.id === 'CX-TST').length, 0,
+                                    `Rejected: ${JSON.stringify(cg)}`);
+                            }
+                        });
+
+                        QUnit.test('Malformed entries are dropped and counted', function(assert) {
+                            const bad = [
+                                entry({ registration: '' }),                       // no registration
+                                entry({ registration: '   ' }),                    // blank registration
+                                entry({ type: 'cessna_172' }),                     // unknown type
+                                entry({ type: undefined }),                        // no type
+                                entry({ registration: 'CX-A', empty_weight: { kg: 0, lbs: 0 } }),        // zero weight
+                                entry({ registration: 'CX-B', empty_weight: { kg: 'heavy', lbs: 1 } }),  // not a number
+                                entry({ registration: 'CX-C', empty_arm: { mm: NaN, in: 10 } }),         // NaN arm
+                                entry({ registration: 'CX-D', empty_weight: null }),                     // missing block
+                                entry({ registration: 'custom' }),                 // reserved id
+                                entry({ registration: 'alpha_trainer' }),          // reserved id
+                                null, 'a string', 42, []
+                            ];
+                            vm.applyFleetPayload(payload(...bad, entry()));
+                            assert.equal(vm.fleetSkipped, bad.length, `All ${bad.length} bad entries skipped`);
+                            assert.equal(vm.fleet.length, 4, 'Only the good one was added to the three handbook entries');
+                            assert.equal(vm.fleet.find(p => p.id === 'custom').data.metric.weight, 308,
+                                'And the reserved entry it tried to shadow is untouched');
+                        });
+
+                        QUnit.test('A duplicate registration is rejected', function(assert) {
+                            vm.applyFleetPayload(payload(entry(), entry({ empty_weight: { kg: 999, lbs: 999 } })));
+                            assert.equal(vm.fleetSkipped, 1, 'Second CX-TST skipped');
+                            assert.equal(vm.fleet.filter(p => p.id === 'CX-TST').length, 1, 'Only one entry survives');
+                            assert.equal(vm.fleet.find(p => p.id === 'CX-TST').data.metric.weight, 300, 'The first one');
+                        });
+
+                        QUnit.test('A payload with the wrong shape is refused whole', function(assert) {
+                            for (const bad of [null, undefined, 42, 'text', [], {}, { schema: 2, aircraft: [] },
+                                               { schema: 1 }, { schema: 1, aircraft: 'nope' }, { aircraft: [] }]) {
+                                vm.applyFleetPayload(bad);
+                                assert.equal(vm.fleetStatus, 'error', `Refused: ${JSON.stringify(bad)}`);
+                            }
+                            assert.deepEqual(vm.fleet.map(p => p.id), ['custom', 'alpha_trainer_pro', 'alpha_trainer'],
+                                'The handbook entries survive every bad payload');
+                        });
+
+                        QUnit.test('Reloading does not duplicate the fleet', function(assert) {
+                            vm.applyFleetPayload(payload(entry()));
+                            vm.applyFleetPayload(payload(entry()));
+                            vm.applyFleetPayload(payload(entry()));
+                            assert.equal(vm.fleet.filter(p => p.id === 'CX-TST').length, 1, 'Still one CX-TST');
+                            assert.equal(vm.fleet.length, 4, 'Fleet did not grow');
+                        });
+
+                        QUnit.test('An undated empty weight is flagged', function(assert) {
+                            vm.applyFleetPayload(payload(entry(), entry({ registration: 'CX-OLD', weighing_date: null })));
+                            vm.selectedPlaneId = 'CX-TST';
+                            assert.equal(vm.currentPlaneWeighingDate, '2026-01-15', 'Dated aircraft shows its date');
+                            assert.false(vm.currentPlaneUndated, 'And is not flagged');
+                            vm.selectedPlaneId = 'CX-OLD';
+                            assert.equal(vm.currentPlaneWeighingDate, '', 'Undated aircraft has no date to show');
+                            assert.true(vm.currentPlaneUndated, 'And is flagged');
+                            // The handbook samples are not airframes, so they need no date
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            assert.false(vm.currentPlaneUndated, 'POH sample aircraft are not flagged');
+                        });
+
+                        QUnit.test('A file that cannot be read leaves the calculator usable', function(assert) {
+                            const done = assert.async();
+                            vm.applyFleetPayload(payload(entry()));      // fleet loaded first
+                            vm.FLEET_URL = 'datasets/does-not-exist.json';
+                            vm.loadFleet().then(ok => {
+                                assert.false(ok, 'Load reported failure');
+                                assert.equal(vm.fleetStatus, 'error', 'Status is error, not ready');
+                                assert.true(vm.fleetFailed, 'And the UI can see it');
+                                assert.deepEqual(vm.fleet.map(p => p.id), ['custom', 'alpha_trainer_pro', 'alpha_trainer'],
+                                    'Stale registrations are dropped, not left behind');
+                                // Custom still works, which is the whole point of not falling over
+                                vm.selectedPlaneId = 'custom';
+                                vm.loadPlaneData();
+                                vm.load.pilot = 80; vm.fuel.startAmount = 40; vm.update();
+                                assert.equal(vm.pointStatus(vm.results.takeoff), 'ok', 'Custom aircraft still computes');
+                                done();
+                            });
+                        });
+
+                        // The repository ships an example file, not a real one: fleet.json
+                        // describes actual airframes and belongs to whoever operates them,
+                        // so each deployment provides its own. What the suite can still
+                        // guarantee is that the documented format is the one the loader
+                        // accepts, which is what anyone copying the example depends on.
+                        QUnit.test('The example fleet file shipped in the repo is valid', function(assert) {
+                            const done = assert.async();
+                            vm.FLEET_URL = 'datasets/fleet.example.json';
+                            vm.loadFleet().then(ok => {
+                                assert.true(ok, 'datasets/fleet.example.json loads and validates');
+                                assert.equal(vm.fleetSkipped, 0, 'No entry in it was rejected');
+                                assert.true(vm.fleet.length > 3, 'It contributes at least one registration');
+                                for (const p of vm.fleet.filter(p => !vm.RESERVED_IDS.includes(p.id))) {
+                                    assert.ok(Math.abs(p.data.metric.weight * 2.20462 - p.data.imperial.weight) < 1.5,
+                                        `${p.id}: the kg and lbs figures agree with each other`);
+                                    assert.ok(Math.abs(p.data.metric.arm / 25.4 - p.data.imperial.arm) < 0.1,
+                                        `${p.id}: the mm and inch arms agree with each other`);
+                                }
+                                done();
+                            });
+                        });
+                    });
+
+                    QUnit.module('POH source data (Sections 2.6, 2.7, 2.8 and 6.2)', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() { vm = wbCalculator(); vm.init(); });
+
+                        QUnit.test('2.6 Weight and CG limits', function(assert) {
+                            const m = vm.constants.metric.limits, i = vm.constants.imperial.limits;
+                            assert.equal(m.mtom, 550, 'MTOM 550 kg');
+                            assert.equal(m.aft, 373, 'Most rearward CG 373 mm (37 % MAC)');
+                            // The handbooks print 1212 lbs and the calculator carries 1212.5,
+                            // the exact conversion of 550 kg (550 x 2.20462 = 1212.54). Kept
+                            // deliberately: the metric figure is the authoritative one.
+                            assert.equal(i.mtom, 1212.5, 'MTOM in pounds is the conversion of 550 kg, not the printed 1212');
+                            assert.equal(i.aft, 14.7, 'Most rearward CG 14.7 in (as the AT prints it; the PRO prints 14 11/16 for the same 373 mm)');
+
+                            // Envelope: 25 % to 37 % MAC in all three handbooks, and all three
+                            // print CG%MAC = 100 x (CGmm - 40) / 900, so 25 % is 265 mm and
+                            // 37 % is 373. The Trainer prints 265; the PRO prints 267 while its
+                            // own inches (10 7/16 = 265.1 mm) and its own formula say 265. We
+                            // carry 267 on both: the more restrictive reading of a doubtful
+                            // limit, and the one the club checklist flies with.
+                            const t = vm.aircraftTypes;
+                            const mac = pct => 40 + pct * 900;
+                            assert.equal(mac(0.25), 265, 'The published formula puts 25 % MAC at 265 mm');
+                            assert.equal(mac(0.37), 373, 'And 37 % MAC at 373 mm');
+                            for (const key of ['alpha_trainer', 'alpha_trainer_pro']) {
+                                assert.deepEqual(t[key].limits.metric, { fwd: 267, aft: 373 },
+                                    `${key}: forward 267 mm (see the note above), rearward 373 mm`);
+                                assert.deepEqual(t[key].limits.imperial, { fwd: 10.5, aft: 14.7 },
+                                    `${key}: the same envelope converted from millimetres`);
+                            }
+                            assert.equal(t.alpha_trainer.poh, 'POH-162-00-40-001_A07', 'Trainer handbook reference');
+                            assert.equal(t.alpha_trainer_pro.poh, 'POH-162-00-40-003_B01', 'PRO handbook reference');
+                        });
+
+                        QUnit.test('The handbook fleet entries agree with their type', function(assert) {
+                            // custom and the two sample aircraft spell their limits out, so this
+                            // keeps the two copies from drifting apart on the next edit.
+                            const t = vm.aircraftTypes;
+                            const of = id => vm.fleet.find(p => p.id === id).limits;
+                            assert.deepEqual(of('alpha_trainer'), t.alpha_trainer.limits, 'Trainer sample matches its type');
+                            assert.deepEqual(of('alpha_trainer_pro'), t.alpha_trainer_pro.limits, 'PRO sample matches its type');
+                            assert.deepEqual(of('custom'), t.alpha_trainer_pro.limits, 'Custom defaults to the same envelope');
+                            // And the fallback pair in constants agrees with them too. Both
+                            // ends: this checked only the forward limit until a mutation run
+                            // walked the rearward one from 373 to 378 and nothing here
+                            // noticed. The pair in constants never reaches a verdict, because
+                            // currentLimits always overrides it with the selected aircraft's,
+                            // so this assertion is the only thing keeping the two copies from
+                            // drifting into disagreeing about the same handbook.
+                            const c = vm.constants;
+                            assert.equal(c.metric.limits.fwd, t.alpha_trainer.limits.metric.fwd, 'Metric forward fallback agrees');
+                            assert.equal(c.metric.limits.aft, t.alpha_trainer.limits.metric.aft, 'Metric rearward fallback agrees');
+                            assert.equal(c.imperial.limits.fwd, t.alpha_trainer.limits.imperial.fwd, 'Imperial forward fallback agrees');
+                            assert.equal(c.imperial.limits.aft, t.alpha_trainer.limits.imperial.aft, 'Imperial rearward fallback agrees');
+                        });
+
+                        QUnit.test('2.7 Occupancy', function(assert) {
+                            const m = vm.constants.metric.limits, i = vm.constants.imperial.limits;
+                            assert.equal(m.maxSeat, 110, 'Maximum weight per seat 110 kg');
+                            assert.equal(i.maxSeat, 242, 'Maximum weight per seat 242 lbs');
+                            assert.equal(m.maxOccupants, 200, 'Both seats 200 kg');
+                            assert.equal(i.maxOccupants, 440, 'Both seats 440 lbs');
+                            assert.equal(m.minPilot, 55, 'Minimum weight solo pilot 55 kg');
+                            assert.equal(i.minPilot, 121, 'Minimum weight solo pilot 121 lbs');
+                            assert.equal(m.maxBaggage, 10, 'Maximum baggage 10 kg');
+                            assert.equal(i.maxBaggage, 22, 'Maximum baggage 22 lbs');
+                        });
+
+                        QUnit.test('2.8 Fuel', function(assert) {
+                            const met = vm.constants.metric, imp = vm.constants.imperial;
+                            assert.equal(met.limits.maxFuelTotal, 50, 'Total capacity 50 L');
+                            assert.equal(imp.limits.maxFuelTotal, 13.2, 'Total capacity 13.2 US gal');
+                            assert.equal(met.unusableFuel, 2.0, 'Unusable fuel 2 L');
+                            assert.equal(imp.unusableFuel, 0.5, 'Unusable fuel 0.5 US gal');
+                            // 50 L total minus 2 unusable is the 48 L the POH publishes as usable
+                            assert.equal(met.limits.maxFuelTotal - met.unusableFuel, 48, 'Usable fuel 48 L');
+                            assert.equal(imp.limits.maxFuelTotal - imp.unusableFuel, 12.7, 'Usable fuel 12.7 US gal');
+                            // Density comes from the published weight of a full tank
+                            assert.equal(met.fuelDensity, 36 / 50, 'Density 0.72 kg/L (36 kg per 50 L)');
+                            assert.ok(Math.abs(imp.fuelDensity - 79 / 13.2) < 0.02, 'Density 6.0 lbs/gal (79 lbs per 13.2 gal)');
+                        });
+
+                        QUnit.test('6.2 Arms are the normative italic values', function(assert) {
+                            // "The arm values in italic font are accurate and shall be used for
+                            // any preflight calculations." Identical in both handbooks.
+                            assert.deepEqual(vm.constants.metric.arms,
+                                { pilot: 370, copilot: 370, fuel: 1130, baggage: 930 }, 'Arms in mm');
+                            // 14.5 in is what the POH prints; 370 mm would convert to 14.57
+                            assert.deepEqual(vm.constants.imperial.arms,
+                                { pilot: 14.5, copilot: 14.5, fuel: 44.5, baggage: 36.6 }, 'Arms in inches, as printed');
+                        });
+
+                        QUnit.test('6.2 Sample aircraft empty weights', function(assert) {
+                            // The sample calculations are illustrative for weight, but these two
+                            // entries are taken straight from them, so they have to match.
+                            const at = vm.fleet.find(p => p.id === 'alpha_trainer');
+                            assert.deepEqual(at.data.metric, { weight: 293.6, arm: 254 }, 'AT sample: 293.6 kg at 254 mm');
+                            assert.deepEqual(at.data.imperial, { weight: 647.6, arm: 10 }, 'AT sample: 647.6 lbs at 10 in');
+                            const custom = vm.fleet.find(p => p.id === 'custom');
+                            assert.deepEqual(custom.data.metric, { weight: 308, arm: 254 }, 'PRO sample: 308 kg at 254 mm');
+                            assert.deepEqual(custom.data.imperial, { weight: 679, arm: 10 }, 'PRO sample: 679 lbs at 10 in');
+                        });
+
+                        QUnit.test('6.3 The envelope floor, and what it is not', function(assert) {
+                            // The chart's lower bound is labelled "Empty weight + Minimum weight
+                            // solo pilot", which makes it a property of the aircraft rather than
+                            // a constant. Two things are recorded here rather than asserted as
+                            // correct: the calculator uses one number for every registration,
+                            // and that number is not traceable to the POH. The nearest
+                            // derivation, the Alpha Trainer sample plus the minimum pilot,
+                            // comes to 348.6 and not 348.5.
+                            const m = vm.constants.metric.limits;
+                            assert.equal(m.minW, 348.5, 'Floor 348.5 kg, origin not traceable to the handbook');
+                            const at = vm.fleet.find(p => p.id === 'alpha_trainer');
+                            assert.equal(at.data.metric.weight + m.minPilot, 348.6,
+                                'AT sample empty weight plus the 55 kg minimum pilot is 348.6, 0.1 kg above the constant');
+                            assert.ok(Math.abs(vm.constants.imperial.limits.minW - 348.5 * 2.20462) < 0.01,
+                                'The pound figure is at least the exact conversion of the kilogram one');
+                            // Per the chart's own label, a heavier aircraft has a higher floor.
+                            // The PRO sample already sits above the constant, and a real
+                            // registration heavier than the sample sits higher still.
+                            const pro = vm.fleet.find(p => p.id === 'alpha_trainer_pro');
+                            assert.ok(pro.data.metric.weight + m.minPilot > m.minW,
+                                `The PRO sample's own floor is ${pro.data.metric.weight + m.minPilot} kg, above the constant in use`);
+                        });
+                    });
+
+                    // The module above checks that every limit holds the value the handbook
+                    // prints. That is not the same as checking that the limit does anything.
+                    // A mutation run over this suite found the gap: the rearward CG check
+                    // could be deleted outright, or the whole envelope widened by a
+                    // millimetre, and all 274 assertions still passed. Nothing here had ever
+                    // put a point outside the envelope and demanded a verdict on it. The one
+                    // test that read a 'limit' status reached it through hasLoadErrors, which
+                    // is a different branch entirely.
+                    //
+                    // These tests exercise the verdict itself. The out-of-limits cases use the
+                    // custom aircraft on purpose: the handbook sample airframes sit so deep
+                    // inside the envelope that no legal load takes them out of it, which is
+                    // reassuring for them and useless for testing a boundary. Every case keeps
+                    // the load legal, so a 'limit' verdict can only come from the envelope.
+                    QUnit.module('Envelope verdict (what the limits do)', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() {
+                            vm = wbCalculator();
+                            vm.init();
+                            vm.drawChart = function() {};
+                            vm.selectedPlaneId = 'custom';
+                            vm.loadPlaneData();
+                        });
+
+                        // A point built so the arithmetic lands on the limit exactly: all the
+                        // weight sits at one arm, so the CG IS that arm, with no division to
+                        // round. That is what lets the boundary cases below pin down whether
+                        // the comparison is >= or >, which no approximate case can do.
+                        function pointAt(weight, arm) {
+                            vm.aircraft.weight = weight;
+                            vm.aircraft.arm = arm;
+                            vm.load.pilot = 0; vm.load.copilot = 0; vm.load.baggage = 0;
+                            return vm.calculatePoint(0);
+                        }
+
+                        QUnit.test('An aircraft over MTOM is refused', function(assert) {
+                            vm.aircraft.weight = 308; vm.aircraft.arm = 254;
+                            vm.load.pilot = 100; vm.load.copilot = 100; vm.load.baggage = 10;
+                            vm.fuel.startAmount = 50;
+                            vm.update();
+                            assert.false(vm.hasLoadErrors, 'Every individual load is legal');
+                            assert.true(vm.results.takeoff.weight > vm.currentLimits.mtom,
+                                `${vm.results.takeoff.weight.toFixed(1)} kg is over the 550 kg MTOM`);
+                            assert.false(vm.results.takeoff.isValid, 'So the point is not valid');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                        });
+
+                        QUnit.test('An aircraft under the envelope floor is refused', function(assert) {
+                            vm.aircraft.weight = 280; vm.aircraft.arm = 300;
+                            vm.load.pilot = 55; vm.load.copilot = 0; vm.load.baggage = 0;
+                            vm.fuel.startAmount = 2;   // all unusable: no usable fuel aboard
+                            vm.update();
+                            assert.false(vm.hasLoadErrors, 'The 55 kg pilot is exactly the minimum, not an error');
+                            assert.true(vm.results.takeoff.weight < vm.currentLimits.minW,
+                                `${vm.results.takeoff.weight.toFixed(1)} kg is under the 348.5 kg floor`);
+                            assert.false(vm.results.takeoff.isValid, 'So the point is not valid');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                        });
+
+                        QUnit.test('A CG behind the rearward limit is refused', function(assert) {
+                            vm.aircraft.weight = 308; vm.aircraft.arm = 420;
+                            vm.load.pilot = 55; vm.load.copilot = 0; vm.load.baggage = 10;
+                            vm.fuel.startAmount = 50;
+                            vm.update();
+                            assert.false(vm.hasLoadErrors, 'The load itself is legal');
+                            assert.true(vm.results.takeoff.cg > vm.currentLimits.aft,
+                                `CG ${vm.results.takeoff.cg.toFixed(1)} mm is behind the 373 mm limit`);
+                            assert.false(vm.results.takeoff.isValid, 'So the point is not valid');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                        });
+
+                        QUnit.test('A CG ahead of the forward limit is refused', function(assert) {
+                            vm.aircraft.weight = 308; vm.aircraft.arm = 200;
+                            vm.load.pilot = 55; vm.load.copilot = 0; vm.load.baggage = 0;
+                            vm.fuel.startAmount = 2;
+                            vm.update();
+                            assert.false(vm.hasLoadErrors, 'The load itself is legal');
+                            assert.true(vm.results.takeoff.cg < vm.currentLimits.fwd,
+                                `CG ${vm.results.takeoff.cg.toFixed(1)} mm is ahead of the 267 mm limit`);
+                            assert.false(vm.results.takeoff.isValid, 'So the point is not valid');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                        });
+
+                        QUnit.test('The landing point is judged too, not only the takeoff one', function(assert) {
+                            // Burning fuel moves the CG forward here, so a load can be legal at
+                            // takeoff and illegal on arrival. A verdict on the takeoff point
+                            // alone would report that flight as fine.
+                            vm.aircraft.weight = 308; vm.aircraft.arm = 232;
+                            vm.load.pilot = 55; vm.load.copilot = 0; vm.load.baggage = 0;
+                            vm.fuel.startAmount = 50; vm.fuel.flightTime = 4.0;
+                            vm.update();
+                            assert.false(vm.hasLoadErrors, 'The load itself is legal');
+                            assert.true(vm.results.takeoff.isValid, 'Inside the envelope at takeoff');
+                            assert.false(vm.results.landing.isValid, 'Outside it on landing, once the fuel is burned');
+                            assert.equal(vm.pointStatus(vm.results.landing), 'limit', 'And the landing cell says so');
+                        });
+
+                        QUnit.test('A point exactly on a limit is inside it', function(assert) {
+                            // Fixes the comparisons as >= and <=. The POH publishes these as
+                            // limits of the permitted range, so the boundary belongs to it.
+                            assert.true(pointAt(400, 267).isValid, 'CG exactly on the 267 mm forward limit');
+                            assert.true(pointAt(400, 373).isValid, 'CG exactly on the 373 mm rearward limit');
+                            assert.true(pointAt(550, 300).isValid, 'Weight exactly at the 550 kg MTOM');
+                            assert.true(pointAt(348.5, 300).isValid, 'Weight exactly on the 348.5 kg floor');
+                        });
+
+                        QUnit.test('A point just outside a limit is outside it', function(assert) {
+                            // The other half of the boundary: a tenth past each limit has to
+                            // flip the verdict. Together with the test above this leaves no
+                            // room to widen the envelope without failing the suite.
+                            assert.false(pointAt(400, 266.9).isValid, 'CG a tenth ahead of the forward limit');
+                            assert.false(pointAt(400, 373.1).isValid, 'CG a tenth behind the rearward limit');
+                            assert.false(pointAt(550.1, 300).isValid, 'A tenth of a kilo over MTOM');
+                            assert.false(pointAt(348.4, 300).isValid, 'A tenth of a kilo under the floor');
+                        });
+
+                        QUnit.test('The verdict holds in imperial too', function(assert) {
+                            // A registered aircraft, not the custom one: setUnits loads the
+                            // published imperial limits for those (case A) and converts the
+                            // metric ones for the custom aircraft (case B), which is a
+                            // different path with a different answer. The test below records
+                            // that one. Here the point is that the verdict itself survives the
+                            // unit switch, judged against the figures the handbook prints.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.setUnits('imperial');
+                            const lim = vm.currentLimits;
+                            assert.equal(lim.fwd, 10.5, 'Forward limit is the published 10.5 in');
+                            assert.equal(lim.aft, 14.7, 'Rearward limit is the published 14.7 in');
+                            assert.true(pointAt(900, 10.5).isValid, 'CG exactly on the forward limit');
+                            assert.true(pointAt(900, 14.7).isValid, 'CG exactly on the rearward limit');
+                            assert.false(pointAt(900, 10.4).isValid, 'A tenth of an inch ahead of it');
+                            assert.false(pointAt(900, 14.8).isValid, 'A tenth of an inch behind it');
+                            assert.true(pointAt(1212.5, 12).isValid, 'Weight exactly at MTOM');
+                            assert.false(pointAt(1213, 12).isValid, 'Half a pound over it');
+                        });
+
+                        QUnit.test('The custom aircraft reads its envelope, it does not convert it', function(assert) {
+                            // This one is here because it used to be false. setUnits converted
+                            // the custom aircraft's limits arithmetically, and the round trip
+                            // came back with 373.1 mm, a tenth of a millimetre behind the
+                            // published rearward limit. Small, and in the direction that
+                            // widens an envelope, which is the direction that does not get
+                            // the benefit of the doubt. The limits now come from the entry,
+                            // which publishes both unit systems, so no rounding sits between
+                            // the handbook and the verdict.
+                            vm.setUnits('imperial');
+                            assert.equal(vm.currentLimits.fwd, 10.5, 'The published 10.5 in, not the 10.51 a conversion gives');
+                            assert.equal(vm.currentLimits.aft, 14.7, 'The published 14.7 in, not the 14.69 a conversion gives');
+                            vm.setUnits('metric');
+                            assert.equal(vm.currentLimits.fwd, 267, 'And back to the published 267 mm');
+                            assert.equal(vm.currentLimits.aft, 373, 'And to 373 mm, not the 373.1 the old round trip returned');
+                            for (let i = 0; i < 5; i++) { vm.setUnits('imperial'); vm.setUnits('metric'); }
+                            assert.equal(vm.currentLimits.fwd, 267, 'Five more round trips move the forward limit not at all');
+                            assert.equal(vm.currentLimits.aft, 373, 'Nor the rearward one');
+                        });
+
+                        QUnit.test('The empty weight and arm still convert, they are the user figures', function(assert) {
+                            // The other half of the fix: only the limits stopped converting.
+                            // The custom aircraft's weight and arm are typed in by whoever is
+                            // using it, so they have to follow the unit switch.
+                            vm.aircraft.weight = 300; vm.aircraft.arm = 254;
+                            vm.setUnits('imperial');
+                            assert.closeTo(vm.aircraft.weight, 661.39, 0.01, '300 kg reads as 661.39 lbs');
+                            assert.closeTo(vm.aircraft.arm, 10, 0.01, '254 mm reads as 10 in');
+                            vm.setUnits('metric');
+                            assert.closeTo(vm.aircraft.weight, 300, 0.05, 'And back to 300 kg inside its rounding');
+                            assert.closeTo(vm.aircraft.arm, 254, 0.05, 'And to 254 mm');
+                        });
+                    });
+
+                    // The envelope limits above are one of the two families of limit in here.
+                    // The other is the load: what one seat may carry, what both may carry
+                    // together, how light a solo pilot may be, how much baggage goes in. They
+                    // run through hasLoadErrors rather than through isValid, and the same
+                    // mutation run found the same hole in them: the maximum baggage could go
+                    // from 10 kg to 15 and the only thing that failed was the module copying
+                    // the figure out of the handbook. Their values were checked, their effect
+                    // was not. Each one is pinned here at its boundary, from both sides.
+                    QUnit.module('Load limits (what they refuse)', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() {
+                            vm = wbCalculator();
+                            vm.init();
+                            vm.drawChart = function() {};
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            // A legal baseline every test then breaks in exactly one way
+                            vm.load.pilot = 80; vm.load.copilot = 0; vm.load.baggage = 0;
+                            vm.fuel.startAmount = 30;
+                            vm.update();
+                        });
+
+                        QUnit.test('Baggage over the maximum is refused, at the maximum it is not', function(assert) {
+                            vm.load.baggage = 10; vm.update();
+                            assert.false(vm.hasLoadErrors, '10 kg is the limit itself, which is allowed');
+                            vm.load.baggage = 10.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth over it is not');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                        });
+
+                        QUnit.test('One seat over its maximum is refused, at the maximum it is not', function(assert) {
+                            vm.load.pilot = 110; vm.update();
+                            assert.false(vm.hasLoadErrors, '110 kg on a seat is the limit itself');
+                            vm.load.pilot = 110.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth over it is not');
+                            vm.load.pilot = 80; vm.load.copilot = 110.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'And the check is on the copilot seat too, not only the pilot one');
+                        });
+
+                        QUnit.test('Both seats together over the cabin maximum is refused', function(assert) {
+                            // 100 and 100 breaks nothing on its own: each seat is inside its
+                            // own limit and only the pair is over. Without this case a cabin
+                            // limit could be deleted and every other test would still pass.
+                            vm.load.pilot = 100; vm.load.copilot = 100; vm.update();
+                            assert.false(vm.hasLoadErrors, '200 kg between the two seats is the limit itself');
+                            vm.load.copilot = 100.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth over it is not');
+                            assert.true(vm.load.pilot < vm.currentLimits.maxSeat && vm.load.copilot < vm.currentLimits.maxSeat,
+                                'And neither seat is over its own limit, so only the pair can be refusing it');
+                        });
+
+                        QUnit.test('A solo pilot under the minimum is refused, at the minimum is not', function(assert) {
+                            vm.load.pilot = 55; vm.update();
+                            assert.false(vm.hasLoadErrors, '55 kg is the minimum itself, which is allowed');
+                            vm.load.pilot = 54.9; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth under it is not');
+                            assert.equal(vm.pointStatus(vm.results.takeoff), 'limit', 'And the cell says out of limits');
+                            // The distinction the whole pending gate exists for
+                            vm.load.pilot = null; vm.update();
+                            assert.false(vm.hasLoadErrors, 'A pilot nobody entered is not a pilot under the minimum');
+                        });
+
+                        QUnit.test('The load limits hold in imperial too', function(assert) {
+                            // Switch first, load second: setUnits converts whatever is already
+                            // in the fields, which would turn these figures into something else.
+                            vm.setUnits('imperial');
+                            const lim = vm.currentLimits;
+                            assert.equal(lim.minPilot, 121, 'Minimum solo pilot is the published 121 lbs');
+                            assert.equal(lim.maxSeat, 242, 'Maximum per seat is the published 242 lbs');
+                            assert.equal(lim.maxOccupants, 440, 'Cabin maximum is the published 440 lbs');
+                            assert.equal(lim.maxBaggage, 22, 'Maximum baggage is the published 22 lbs');
+                            vm.load.pilot = 121; vm.load.copilot = 0; vm.load.baggage = 22; vm.update();
+                            assert.false(vm.hasLoadErrors, 'Everything exactly at its limit is allowed');
+                            vm.load.pilot = 120.9; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth of a pound under the minimum pilot is not');
+                            vm.load.pilot = 121; vm.load.baggage = 22.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'Nor a tenth over the maximum baggage');
+                            // Same shape as the metric cabin case: 220 a seat is inside the
+                            // 242 limit, so only the pair can be doing the refusing.
+                            vm.load.baggage = 22; vm.load.pilot = 220; vm.load.copilot = 220; vm.update();
+                            assert.false(vm.hasLoadErrors, '440 lbs between the two seats is the limit itself');
+                            vm.load.copilot = 220.1; vm.update();
+                            assert.true(vm.hasLoadErrors, 'A tenth over it is not');
+                        });
+                    });
+
+                    QUnit.module('Invariants (grid sweeps)', function(hooks) {
+                        let vm;
+                        hooks.beforeEach(function() {
+                            vm = wbCalculator();
+                            vm.init();
+                            // The canvas is in the DOM even in test mode. These sweeps are about
+                            // the arithmetic, and redrawing it thousands of times only adds time.
+                            vm.drawChart = function() {};
+                        });
+
+                        QUnit.test('Endurance minus remaining time equals the planned time', function(assert) {
+                            // Remaining time is what the fuel buys AFTER the plan, so the two
+                            // have to differ by exactly the planned time. The pair drifting apart
+                            // is how a fuel figure silently starts answering a different question.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            vm.load.pilot = 80;
+                            let worst = { err: 0 };
+                            for (let perf = 0; perf < vm.perfProfiles.length; perf++) {
+                                for (let fuel = 0; fuel <= 50; fuel += 1.25) {
+                                    for (let hours = 0; hours <= 6; hours += 0.25) {
+                                        vm.selectedPerfIndex = perf;
+                                        vm.fuel.startAmount = fuel;
+                                        vm.fuel.flightTime = hours;
+                                        vm.update();
+                                        const err = Math.abs((vm.fuelResults.enduranceHours - vm.fuelResults.remainingTime) - hours);
+                                        if (err > worst.err) worst = { err, perf, fuel, hours };
+                                    }
+                                }
+                            }
+                            assert.ok(worst.err < 1e-9,
+                                `endurance - remaining == planned time (worst error ${worst.err.toExponential(1)})`);
+                        });
+
+                        QUnit.test('The aircraft never lands heavier than it took off', function(assert) {
+                            // Burning fuel cannot add weight. Negative flight times used to break
+                            // this before update() clamped them, so it stays watched.
+                            vm.selectedPlaneId = 'alpha_trainer';
+                            vm.loadPlaneData();
+                            let bad = null;
+                            for (let pilot = 55; pilot <= 110 && !bad; pilot += 5) {
+                                for (let fuel = 0; fuel <= 50 && !bad; fuel += 2.5) {
+                                    for (let hours = -2; hours <= 8; hours += 0.5) {
+                                        vm.load = { pilot: pilot, copilot: 0, baggage: 5 };
+                                        vm.fuel = { startAmount: fuel, flightTime: hours };
+                                        vm.update();
+                                        if (vm.results.landing.weight > vm.results.takeoff.weight + 1e-9) {
+                                            bad = { pilot, fuel, hours, to: vm.results.takeoff.weight, ldg: vm.results.landing.weight };
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            assert.ok(bad === null, bad === null ? 'Landing weight stays at or below takeoff weight'
+                                : `Landed heavier at ${JSON.stringify(bad)}`);
+                        });
+
+                        QUnit.test('Takeoff weight equals the sum of its parts', function(assert) {
+                            // Conservation check: an item added to the form but forgotten in
+                            // calculatePoint() shows up here and nowhere else.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            let worst = { err: 0 };
+                            for (let pilot = 55; pilot <= 110; pilot += 5) {
+                                for (let copilot = 0; copilot <= 100; copilot += 10) {
+                                    for (let baggage = 0; baggage <= 10; baggage += 2.5) {
+                                        for (let fuel = 0; fuel <= 50; fuel += 5) {
+                                            vm.load = { pilot: pilot, copilot: copilot, baggage: baggage };
+                                            vm.fuel = { startAmount: fuel, flightTime: 1 };
+                                            vm.update();
+                                            const parts = vm.aircraft.weight + vm.load.pilot + vm.load.copilot +
+                                                          vm.load.baggage + vm.fuelResults.weightStart;
+                                            const err = Math.abs(parts - vm.results.takeoff.weight);
+                                            if (err > worst.err) worst = { err, pilot, copilot, baggage, fuel };
+                                        }
+                                    }
+                                }
+                            }
+                            assert.ok(worst.err < 1e-9, `Every part accounted for (worst error ${worst.err.toExponential(1)})`);
+                        });
+
+                        QUnit.test('More fuel never moves the CG forward', function(assert) {
+                            // The fuel arm (1130 mm) sits behind every other station, so adding
+                            // fuel can only move the CG aft. If this ever reverses, either an arm
+                            // is wrong or the moment is being accumulated with the wrong sign.
+                            vm.selectedPlaneId = 'alpha_trainer_pro';
+                            vm.loadPlaneData();
+                            let bad = null;
+                            for (const pilot of [55, 80, 110]) {
+                                for (const baggage of [0, 5, 10]) {
+                                    let prev = null;
+                                    for (let fuel = 0; fuel <= 50 && !bad; fuel += 0.5) {
+                                        vm.load = { pilot: pilot, copilot: 0, baggage: baggage };
+                                        vm.fuel = { startAmount: fuel, flightTime: 0 };
+                                        vm.update();
+                                        if (prev !== null && vm.results.takeoff.cg < prev - 1e-9) {
+                                            bad = { pilot, baggage, fuel, prev, now: vm.results.takeoff.cg };
+                                        }
+                                        prev = vm.results.takeoff.cg;
+                                    }
+                                }
+                            }
+                            assert.ok(bad === null, bad === null ? 'CG moves aft, never forward, as fuel is added'
+                                : `CG moved forward at ${bad.fuel} L: ${bad.prev.toFixed(2)} to ${bad.now.toFixed(2)} mm`);
+                        });
+
+                        QUnit.test('update() is idempotent, clamping included', function(assert) {
+                            // update() mutates its own inputs (negatives to 0, fuel to tank
+                            // capacity), so a second pass has to be a no-op. Otherwise a value
+                            // could keep creeping on every keystroke.
+                            vm.selectedPlaneId = 'custom';
+                            vm.loadPlaneData();
+                            const snapshot = () => JSON.stringify([vm.load, vm.fuel, vm.results, vm.fuelResults]);
+                            let bad = null;
+                            for (let pilot = -20; pilot <= 130 && !bad; pilot += 25) {
+                                for (let fuel = -10; fuel <= 70 && !bad; fuel += 10) {
+                                    for (let hours = -2; hours <= 8; hours += 2) {
+                                        vm.load = { pilot: pilot, copilot: -5, baggage: 15 };
+                                        vm.fuel = { startAmount: fuel, flightTime: hours };
+                                        vm.update(); const first = snapshot();
+                                        vm.update(); const second = snapshot();
+                                        if (first !== second) { bad = { pilot, fuel, hours }; break; }
+                                    }
+                                }
+                            }
+                            assert.ok(bad === null, bad === null ? 'A second update() on the same state changes nothing'
+                                : `Second run differed at ${JSON.stringify(bad)}`);
+                        });
+
+                        QUnit.test('A units round trip stays inside its rounding, and does not creep', function(assert) {
+                            // setUnits() converts the stored values instead of just displaying
+                            // them, so a round trip cannot be exact: the arm re-rounds to 0.1 mm
+                            // and the tank to 0.01 gal. What matters is that the error is bounded
+                            // AND settles: 20 round trips must not drift further than one.
+                            const worst = { one: {}, twenty: {} };
+                            const track = (bucket, key, value) => { bucket[key] = Math.max(bucket[key] || 0, value); };
+                            // One instance, reset per point: building a calculator carries the
+                            // whole vocabulary with it and this sweep visits a few hundred points.
+                            vm.selectedPlaneId = 'custom';
+                            const load = (w, a, p, f) => {
+                                vm.units = 'metric';
+                                vm.aircraft = { weight: w, arm: a };
+                                vm.load = { pilot: p, copilot: 0, baggage: 0 };
+                                vm.fuel = { startAmount: f, flightTime: 1 };
+                                vm.update();
+                            };
+                            const measure = (bucket, w, a, p, f) => {
+                                track(bucket, 'weight', Math.abs(vm.aircraft.weight - w));
+                                track(bucket, 'arm', Math.abs(vm.aircraft.arm - a));
+                                track(bucket, 'pilot', Math.abs(vm.load.pilot - p));
+                                track(bucket, 'fuel', Math.abs(vm.fuel.startAmount - f));
+                            };
+                            for (let w = 250; w <= 350; w += 10) {
+                                for (let a = 240; a <= 280; a += 2) {
+                                    for (let p = 55; p <= 110; p += 11) {
+                                        for (let f = 0; f <= 50; f += 12.5) {
+                                            load(w, a, p, f);
+                                            vm.setUnits('imperial'); vm.setUnits('metric');
+                                            measure(worst.one, w, a, p, f);
+                                        }
+                                    }
+                                }
+                            }
+                            // Convergence is a yes/no property, so a handful of points is enough.
+                            // Compared point by point on purpose: two global maxima taken over
+                            // different sample sets would let this pass without proving anything.
+                            let creep = null;
+                            for (const [w, a, p, f] of [[250, 240, 55, 0], [308, 254.7, 82.3, 37.4],
+                                                       [312, 272, 110, 50], [350, 279.3, 95, 25.5]]) {
+                                const drift = () => ({ arm: Math.abs(vm.aircraft.arm - a), fuel: Math.abs(vm.fuel.startAmount - f) });
+                                load(w, a, p, f);
+                                vm.setUnits('imperial'); vm.setUnits('metric');
+                                const after1 = drift();
+                                load(w, a, p, f);
+                                for (let i = 0; i < 20; i++) { vm.setUnits('imperial'); vm.setUnits('metric'); }
+                                const after20 = drift();
+                                if (after20.arm > after1.arm + 1e-9 || after20.fuel > after1.fuel + 1e-9) {
+                                    creep = creep || { point: [w, a, p, f], after1, after20 };
+                                }
+                                track(worst.twenty, 'arm', after20.arm);
+                                track(worst.twenty, 'fuel', after20.fuel);
+                            }
+                            assert.ok(worst.one.weight <= 0.01 && worst.one.pilot <= 0.01,
+                                `Weights survive the round trip exactly (empty ${worst.one.weight}, pilot ${worst.one.pilot} kg)`);
+                            assert.ok(worst.one.arm <= 0.15, `Arm stays inside its 0.1 mm rounding (worst ${worst.one.arm.toFixed(3)} mm)`);
+                            assert.ok(worst.one.fuel <= 0.05, `Tank stays inside its rounding (worst ${worst.one.fuel.toFixed(3)} L)`);
+                            assert.ok(creep === null, creep === null
+                                ? `The error settles: 20 round trips drift no further than 1 (arm ${worst.twenty.arm.toFixed(3)} mm, tank ${worst.twenty.fuel.toFixed(3)} L)`
+                                : `Drift kept creeping at ${JSON.stringify(creep)}`);
+                        });
+                    });
+
+                    QUnit.module('Persistence', function(hooks) {
+                        const KEY = 'flight_tools_wb_v1';
+                        hooks.beforeEach(function() { localStorage.removeItem(KEY); });
+                        hooks.afterEach(function() { localStorage.removeItem(KEY); });
+
+                        // Persistence only runs when $watch exists (Alpine context); the
+                        // stub opts a plain factory instance in. loadFleet() is stubbed too:
+                        // init() now waits for the fleet before restoring, and these tests are
+                        // about localStorage, not about the file or the network.
+                        function persistent(c) {
+                            c.$watch = function() {};
+                            c.loadFleet = function() { this.fleetStatus = 'ready'; return Promise.resolve(true); };
+                            return c;
+                        }
+                        // These tests return init()'s promise: QUnit waits on it, and it
+                        // resolves once the fleet is in place and the session restored.
+
+                        QUnit.test('Saves and restores the session', function(assert) {
+                            const a = persistent(wbCalculator());
+                            return a.init().then(() => {
+                                a.selectedPlaneId = 'alpha_trainer_pro';
+                                a.loadPlaneData();
+                                a.load.pilot = 82;
+                                a.fuel.startAmount = 35;
+                                a.update();
+                                assert.ok(localStorage.getItem(KEY), 'State written to storage');
+
+                                const b = persistent(wbCalculator());
+                                return b.init().then(() => {
+                                    assert.equal(b.selectedPlaneId, 'alpha_trainer_pro', 'Registration restored');
+                                    assert.equal(b.aircraft.weight, 308, 'Aircraft data restored raw');
+                                    assert.equal(b.load.pilot, 82, 'Pilot weight restored');
+                                    assert.equal(b.fuel.startAmount, 35, 'Fuel restored');
+                                    assert.ok(b.results.takeoff.weight > 0, 'Recomputed on init');
+                                    assert.strictEqual(b.savedAt, a.savedAt, 'savedAt restored, not refreshed');
+                                });
+                            });
+                        });
+
+                        QUnit.test('Custom aircraft data survives the round trip', function(assert) {
+                            const a = persistent(wbCalculator());
+                            return a.init().then(() => {
+                                a.selectedPlaneId = 'custom';
+                                a.loadPlaneData();
+                                a.aircraft.weight = 315.5;
+                                a.aircraft.arm = 258;
+                                a.update();
+
+                                const b = persistent(wbCalculator());
+                                return b.init().then(() => {
+                                    assert.equal(b.selectedPlaneId, 'custom');
+                                    assert.equal(b.aircraft.weight, 315.5, 'Custom empty weight kept (not wiped by loadPlaneData)');
+                                    assert.equal(b.aircraft.arm, 258, 'Custom arm kept');
+                                });
+                            });
+                        });
+
+                        QUnit.test('Corrupt or invalid payloads are ignored', function(assert) {
+                            localStorage.setItem(KEY, 'not json');
+                            const c = persistent(wbCalculator());
+                            return c.init().then(() => {
+                                assert.equal(c.selectedPlaneId, '', 'Corrupt JSON leaves defaults');
+                                assert.strictEqual(c.savedAt, null);
+
+                                localStorage.setItem(KEY, JSON.stringify({
+                                    v: 1, savedAt: Date.now(),
+                                    state: { selectedPlaneId: 'CX-NOPE', load: { pilot: 80, copilot: 0, baggage: 0 }, units: 'nautical' }
+                                }));
+                                const d = persistent(wbCalculator());
+                                return d.init().then(() => {
+                                    assert.equal(d.selectedPlaneId, '', 'Unknown registration skipped');
+                                    assert.equal(d.load.pilot, 80, 'Valid load applied');
+                                    assert.equal(d.units, 'metric', 'Unknown units skipped');
+                                });
+                            });
+                        });
+
+                        QUnit.test('reset() clears storage and data but keeps preferences', function(assert) {
+                            const c = persistent(wbCalculator());
+                            return c.init().then(() => {
+                                c.selectedPlaneId = 'alpha_trainer';
+                                c.loadPlaneData();
+                                c.load.pilot = 90;
+                                c.lang = 'en';
+                                c.update();
+                                assert.ok(localStorage.getItem(KEY));
+
+                                c.reset();
+                                assert.strictEqual(localStorage.getItem(KEY), null, 'Storage cleared and not re-saved by the reset update()');
+                                assert.equal(c.selectedPlaneId, '', 'Back to the registration prompt');
+                                assert.strictEqual(c.load.pilot, null, 'Pilot empty again');
+                                assert.strictEqual(c.savedAt, null, 'Age clock hidden');
+                                assert.equal(c.lang, 'en', 'Language preference kept');
+                            });
+                        });
+
+                        QUnit.test('Language and units changes persist without refreshing the age clock', function(assert) {
+                            const c = persistent(wbCalculator());
+                            return c.init().then(() => {
+                            c.load.pilot = 80;
+                            c.update();
+                            c.savedAt = 12345;
+
+                            c.setLang('en');
+                            let stored = JSON.parse(localStorage.getItem(KEY));
+                            assert.strictEqual(stored.savedAt, 12345, 'setLang keeps the clock');
+                            assert.equal(stored.state.lang, 'en', 'Language persisted');
+
+                            c.setUnits('imperial');
+                            stored = JSON.parse(localStorage.getItem(KEY));
+                            assert.strictEqual(stored.savedAt, 12345, 'setUnits keeps the clock');
+                            assert.equal(stored.state.units, 'imperial', 'Units persisted');
+
+                            c.load.pilot = 190;
+                            c.update();
+                            stored = JSON.parse(localStorage.getItem(KEY));
+                            assert.notEqual(stored.savedAt, 12345, 'A data edit does refresh the clock');
+                            });
+                        });
+
+                        QUnit.test('A saved registration is dropped if the fleet cannot be read', function(assert) {
+                            // The ordering that matters now that the fleet arrives over the
+                            // network: the session names an aircraft, the file is unreachable.
+                            // The registration must not come back as a label with no data
+                            // behind it. Note this one does NOT stub loadFleet: the failing
+                            // fetch is the point.
+                            localStorage.setItem(KEY, JSON.stringify({
+                                v: 1, savedAt: Date.now(),
+                                state: { selectedPlaneId: 'CX-GHOST', load: { pilot: 80, copilot: 0, baggage: 0 },
+                                         fuel: { startAmount: 30, flightTime: 1 } }
+                            }));
+                            const c = wbCalculator();
+                            c.$watch = function() {};
+                            c.FLEET_URL = 'datasets/does-not-exist.json';
+                            return c.init().then(() => {
+                                assert.equal(c.fleetStatus, 'error', 'Fleet failed to load');
+                                assert.equal(c.selectedPlaneId, '', 'The saved registration was not restored');
+                                assert.false(c.planeSelected, 'So the results stay behind the registration prompt');
+                                assert.equal(c.load.pilot, 80, 'The rest of the session still came back');
+                                assert.equal(c.fuel.startAmount, 30, 'Including the fuel');
+                            });
+                        });
+
+                        QUnit.test('formatAge labels', function(assert) {
+                            const c = wbCalculator();
+                            assert.equal(c.formatAge(30 * 1000), 'Ingresaste datos recién');
+                            assert.equal(c.formatAge(5 * 60 * 1000), 'Ingresaste datos por última vez hace 5 min');
+                            assert.equal(c.formatAge(3 * 3600 * 1000), 'Ingresaste datos por última vez hace 3 h');
+                            assert.equal(c.formatAge(24 * 3600 * 1000), 'Ingresaste datos por última vez hace 1 día');
+                            assert.equal(c.formatAge(2 * 24 * 3600 * 1000), 'Ingresaste datos por última vez hace 2 días');
+                            c.lang = 'en';
+                            assert.equal(c.formatAge(5 * 60 * 1000), 'You last entered data 5 min ago');
+                            assert.equal(c.formatAge(24 * 3600 * 1000), 'You last entered data 1 day ago');
+                            assert.equal(c.formatAge(2 * 24 * 3600 * 1000), 'You last entered data 2 days ago');
+                        });
+
+                        QUnit.test('Persistence stays inert without Alpine', function(assert) {
+                            const c = wbCalculator();
+                            c.init();
+                            c.load.pilot = 75;
+                            c.update();
+                            assert.strictEqual(localStorage.getItem(KEY), null, 'Plain instances never write');
+
+                            localStorage.setItem(KEY, JSON.stringify({ v: 1, savedAt: 1, state: { load: { pilot: 99, copilot: 0, baggage: 0 } } }));
+                            const d = wbCalculator();
+                            d.init();
+                            assert.strictEqual(d.load.pilot, null, 'Plain instances never read');
+                        });
+                    });
+                };
+                document.head.appendChild(script);
+            }
+        })();
+    </script>
+</body>
+</html>

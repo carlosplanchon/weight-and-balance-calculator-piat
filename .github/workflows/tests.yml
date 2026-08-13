@@ -1,0 +1,64 @@
+# Runs the calculator's QUnit suite on every push to main and on every PR.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Milliseconds, not the ten minutes the experiment itself takes. It compares
+  # the hashes recorded in verification/results.json against index.html and
+  # mutations.json, so editing either without re-running the experiment fails
+  # here instead of leaving a recorded "39 of 39" describing a file that no
+  # longer exists.
+  mutation-result-current:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The recorded mutation result still matches the source
+        run: python3 verification/run_mutations.py --check
+
+  qunit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # run_tests.sh prefers a chrome already on PATH and falls back to the
+      # Playwright cache. The runner image usually ships one, so these steps
+      # are the safety net for images that do not, and the playwright pin in
+      # package.json decides which Chromium that fallback is.
+      - name: Playwright version (Chromium cache key)
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The cache only avoids re-downloading ~290 MB; the key includes the
+      # version, so a playwright bump in package.json rotates it by itself.
+      - name: Chromium cache
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ steps.pw.outputs.version }}-linux
+
+      - name: Install headless Chromium (cache miss)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      # Even on a cache hit the system libraries (apt) are still needed:
+      # the job container is ephemeral and does not keep them.
+      - name: Chromium system dependencies (cache hit)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run QUnit suite
+        run: ./run_tests.sh

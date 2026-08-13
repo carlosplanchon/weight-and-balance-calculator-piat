@@ -1,0 +1,15 @@
+# ---> Node
+node_modules/
+
+# ---> Python
+# The calculator needs none, but the mutation harness in verification/ is a
+# Python script, so byte-compiling or importing it leaves these behind.
+__pycache__/
+*.py[cod]
+
+# ---> Fleet data
+# datasets/fleet.json holds the empty weight, arm and CG limits of real
+# aircraft, transcribed from each airframe's weight and balance manifest. That
+# is deployment data, not code, and it belongs to whoever operates the aircraft.
+# Keep yours out of the repository: copy datasets/fleet.example.json and edit it.
+datasets/fleet.json

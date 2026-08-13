@@ -1,0 +1,394 @@
+{
+  "schema": 1,
+  "_comment": "Written by verification/run_mutations.py. The two hashes below are of the files this result was measured over; run_mutations.py --check compares them against the files on disk, so a result that has gone stale says so instead of standing there looking current.",
+  "source_sha256": "14f913dfe07db54cedffd01c624a4fe3d53bcc37be9190da1a1ef5d093f615d7",
+  "mutations_sha256": "18896586f1956566c79c4dbefbb6b2f2e949f4e0d25eb5c14a4c5e0bb765fcf6",
+  "suite_assertions": 344,
+  "assertions_per_layer": {
+    "examples": 222,
+    "poh": 45,
+    "invariants": 9,
+    "envelope": 46,
+    "loadlimits": 22
+  },
+  "mutations": 39,
+  "escaped": [],
+  "results": [
+    {
+      "id": "M01",
+      "category": "constant",
+      "description": "Fuel arm 1130 -> 1140 mm",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M02",
+      "category": "constant",
+      "description": "Baggage arm 930 -> 903 mm (transposed)",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M03",
+      "category": "constant",
+      "description": "MTOM 550 -> 555 kg",
+      "caught_by": [
+        "poh",
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M04",
+      "category": "constant",
+      "description": "Rearward CG limit 373 -> 378 mm",
+      "caught_by": [
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M05",
+      "category": "constant",
+      "description": "Forward CG limit 267 -> 265 mm (the handbook ambiguity)",
+      "caught_by": [
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M06",
+      "category": "constant",
+      "description": "Minimum weight 348.5 -> 348.0 kg",
+      "caught_by": [
+        "poh",
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M07",
+      "category": "constant",
+      "description": "Max baggage 10 -> 15 kg",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M08",
+      "category": "constant",
+      "description": "Tank capacity 50 -> 48 L (total confused with usable)",
+      "caught_by": [
+        "examples",
+        "poh",
+        "invariants"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M09",
+      "category": "constant",
+      "description": "Unusable fuel 2.0 -> 1.0 L",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M10",
+      "category": "constant",
+      "description": "Fuel density 0.72 -> 0.75 kg/L",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M11",
+      "category": "constant",
+      "description": "Pilot arm 370 -> 372 mm (copilot left alone)",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M12",
+      "category": "constant",
+      "description": "Max seat weight 110 -> 115 kg",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M13",
+      "category": "constant",
+      "description": "Fuel arm 44.5 -> 44.9 in",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M14",
+      "category": "constant",
+      "description": "Baggage arm 36.6 -> 36.7 in",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M15",
+      "category": "constant",
+      "description": "MTOM 1212.5 -> 1212.0 lbs",
+      "caught_by": [
+        "examples",
+        "poh",
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M16",
+      "category": "constant",
+      "description": "Minimum pilot 121 -> 120 lbs",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M17",
+      "category": "constant",
+      "description": "Fuel density 6.0 -> 6.1 lbs/gal",
+      "caught_by": [
+        "examples",
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M18",
+      "category": "constant",
+      "description": "Rearward CG limit 14.7 -> 14.6 in",
+      "caught_by": [
+        "poh"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M19",
+      "category": "constant",
+      "description": "Tank capacity 13.2 -> 12.7 gal (total confused with usable)",
+      "caught_by": [
+        "examples",
+        "poh",
+        "invariants"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M20",
+      "category": "logic",
+      "description": "Fuel burn added instead of subtracted",
+      "caught_by": [
+        "examples",
+        "invariants"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M21",
+      "category": "logic",
+      "description": "Unusable fuel not deducted from the tank reading",
+      "caught_by": [
+        "examples"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M22",
+      "category": "logic",
+      "description": "Baggage moment uses the copilot arm",
+      "caught_by": [
+        "examples"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M23",
+      "category": "logic",
+      "description": "Minimum weight check turned strict",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M24",
+      "category": "logic",
+      "description": "Forward CG check turned strict",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "M25",
+      "category": "logic",
+      "description": "Endurance computed on the tank reading, not usable fuel",
+      "caught_by": [
+        "examples",
+        "invariants"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "P01",
+      "category": "permissive",
+      "description": "Rearward CG limit 1 mm too generous",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "P02",
+      "category": "permissive",
+      "description": "Forward CG limit 1 mm too generous",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "P03",
+      "category": "permissive",
+      "description": "MTOM 1 kg too generous",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "P04",
+      "category": "permissive",
+      "description": "Rearward CG check removed outright",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "P05",
+      "category": "permissive",
+      "description": "Minimum weight check removed outright",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L01",
+      "category": "constant",
+      "description": "Cabin maximum 200 -> 210 kg",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L02",
+      "category": "constant",
+      "description": "Minimum solo pilot 55 -> 50 kg",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L03",
+      "category": "constant",
+      "description": "Max baggage 22 -> 25 lbs",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L04",
+      "category": "constant",
+      "description": "Cabin maximum 440 -> 460 lbs",
+      "caught_by": [
+        "poh",
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L05",
+      "category": "permissive",
+      "description": "Baggage check removed from hasLoadErrors",
+      "caught_by": [
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L06",
+      "category": "permissive",
+      "description": "Cabin check removed from hasLoadErrors",
+      "caught_by": [
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L07",
+      "category": "permissive",
+      "description": "Minimum pilot 5 kg too generous",
+      "caught_by": [
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L08",
+      "category": "permissive",
+      "description": "Seat maximum 5 kg too generous",
+      "caught_by": [
+        "loadlimits"
+      ],
+      "escapes": false
+    },
+    {
+      "id": "L09",
+      "category": "logic",
+      "description": "Unit switch reads the forward limit into the rearward one",
+      "caught_by": [
+        "envelope"
+      ],
+      "escapes": false
+    }
+  ]
+}

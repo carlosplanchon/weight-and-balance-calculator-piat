@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "_comment": [
+    "Deliberate defects introduced into the calculator one at a time, to measure",
+    "what the test suite would actually catch. See VERIFICATION.md for the method",
+    "and the results, and run_mutations.py to reproduce them.",
+    "",
+    "Each entry replaces 'find' with 'replace' in the APPLICATION half of",
+    "index.html, never in the tests. The suite writes every constant out a second",
+    "time on purpose, so a naive replace would edit the check along with the value",
+    "it checks and the mutation would go undetected by construction. The harness",
+    "splits the file at the test loader and refuses any 'find' that does not match",
+    "exactly once on the application side.",
+    "",
+    "CATEGORIES",
+    "  constant    a figure taken from a handbook, edited to a plausible wrong one",
+    "  logic       an edit to the arithmetic or to the flow around it",
+    "  permissive  widens a limit or removes a check, so the calculator accepts",
+    "              something it should refuse. Written deliberately: a tool whose",
+    "              job is to refuse fails dangerously in one direction only.",
+    "",
+    "Adding one is the point. If you can write a defect this set does not cover,",
+    "it belongs here."
+  ],
+  "mutations": [
+    {
+      "id": "M01",
+      "category": "constant",
+      "description": "Fuel arm 1130 -> 1140 mm",
+      "find": "fuel: 1130",
+      "replace": "fuel: 1140"
+    },
+    {
+      "id": "M02",
+      "category": "constant",
+      "description": "Baggage arm 930 -> 903 mm (transposed)",
+      "find": "baggage: 930 }",
+      "replace": "baggage: 903 }"
+    },
+    {
+      "id": "M03",
+      "category": "constant",
+      "description": "MTOM 550 -> 555 kg",
+      "find": "mtom: 550,",
+      "replace": "mtom: 555,"
+    },
+    {
+      "id": "M04",
+      "category": "constant",
+      "description": "Rearward CG limit 373 -> 378 mm",
+      "find": "aft: 373, minW",
+      "replace": "aft: 378, minW"
+    },
+    {
+      "id": "M05",
+      "category": "constant",
+      "description": "Forward CG limit 267 -> 265 mm (the handbook ambiguity)",
+      "find": "fwd: 267, aft: 373, minW",
+      "replace": "fwd: 265, aft: 373, minW"
+    },
+    {
+      "id": "M06",
+      "category": "constant",
+      "description": "Minimum weight 348.5 -> 348.0 kg",
+      "find": "minW: 348.5",
+      "replace": "minW: 348.0"
+    },
+    {
+      "id": "M07",
+      "category": "constant",
+      "description": "Max baggage 10 -> 15 kg",
+      "find": "maxBaggage: 10,",
+      "replace": "maxBaggage: 15,"
+    },
+    {
+      "id": "M08",
+      "category": "constant",
+      "description": "Tank capacity 50 -> 48 L (total confused with usable)",
+      "find": "maxFuelTotal: 50 }",
+      "replace": "maxFuelTotal: 48 }"
+    },
+    {
+      "id": "M09",
+      "category": "constant",
+      "description": "Unusable fuel 2.0 -> 1.0 L",
+      "find": "unusableFuel: 2.0",
+      "replace": "unusableFuel: 1.0"
+    },
+    {
+      "id": "M10",
+      "category": "constant",
+      "description": "Fuel density 0.72 -> 0.75 kg/L",
+      "find": "fuelDensity: 0.72",
+      "replace": "fuelDensity: 0.75"
+    },
+    {
+      "id": "M11",
+      "category": "constant",
+      "description": "Pilot arm 370 -> 372 mm (copilot left alone)",
+      "find": "pilot: 370, copilot: 370",
+      "replace": "pilot: 372, copilot: 370"
+    },
+    {
+      "id": "M12",
+      "category": "constant",
+      "description": "Max seat weight 110 -> 115 kg",
+      "find": "maxSeat: 110,",
+      "replace": "maxSeat: 115,"
+    },
+    {
+      "id": "M13",
+      "category": "constant",
+      "description": "Fuel arm 44.5 -> 44.9 in",
+      "find": "fuel: 44.5",
+      "replace": "fuel: 44.9"
+    },
+    {
+      "id": "M14",
+      "category": "constant",
+      "description": "Baggage arm 36.6 -> 36.7 in",
+      "find": "baggage: 36.6 }",
+      "replace": "baggage: 36.7 }"
+    },
+    {
+      "id": "M15",
+      "category": "constant",
+      "description": "MTOM 1212.5 -> 1212.0 lbs",
+      "find": "mtom: 1212.5",
+      "replace": "mtom: 1212.0"
+    },
+    {
+      "id": "M16",
+      "category": "constant",
+      "description": "Minimum pilot 121 -> 120 lbs",
+      "find": "minPilot: 121,",
+      "replace": "minPilot: 120,"
+    },
+    {
+      "id": "M17",
+      "category": "constant",
+      "description": "Fuel density 6.0 -> 6.1 lbs/gal",
+      "find": "fuelDensity: 6.0",
+      "replace": "fuelDensity: 6.1"
+    },
+    {
+      "id": "M18",
+      "category": "constant",
+      "description": "Rearward CG limit 14.7 -> 14.6 in",
+      "find": "aft: 14.7, minW",
+      "replace": "aft: 14.6, minW"
+    },
+    {
+      "id": "M19",
+      "category": "constant",
+      "description": "Tank capacity 13.2 -> 12.7 gal (total confused with usable)",
+      "find": "maxFuelTotal: 13.2",
+      "replace": "maxFuelTotal: 12.7"
+    },
+    {
+      "id": "M20",
+      "category": "logic",
+      "description": "Fuel burn added instead of subtracted",
+      "find": "usableFuelAmount - this.fuelResults.burnedAmount",
+      "replace": "usableFuelAmount + this.fuelResults.burnedAmount"
+    },
+    {
+      "id": "M21",
+      "category": "logic",
+      "description": "Unusable fuel not deducted from the tank reading",
+      "find": "Math.max(0, this.fuel.startAmount - unusable)",
+      "replace": "Math.max(0, this.fuel.startAmount)"
+    },
+    {
+      "id": "M22",
+      "category": "logic",
+      "description": "Baggage moment uses the copilot arm",
+      "find": "(this.load.baggage * arms.baggage)",
+      "replace": "(this.load.baggage * arms.copilot)"
+    },
+    {
+      "id": "M23",
+      "category": "logic",
+      "description": "Minimum weight check turned strict",
+      "find": "totalWeight >= limits.minW",
+      "replace": "totalWeight > limits.minW"
+    },
+    {
+      "id": "M24",
+      "category": "logic",
+      "description": "Forward CG check turned strict",
+      "find": "cg >= limits.fwd",
+      "replace": "cg > limits.fwd"
+    },
+    {
+      "id": "M25",
+      "category": "logic",
+      "description": "Endurance computed on the tank reading, not usable fuel",
+      "find": "usableFuelAmount / flow : 0;",
+      "replace": "this.fuel.startAmount / flow : 0;"
+    },
+    {
+      "id": "P01",
+      "category": "permissive",
+      "description": "Rearward CG limit 1 mm too generous",
+      "find": "cg <= limits.aft",
+      "replace": "cg <= limits.aft + 1"
+    },
+    {
+      "id": "P02",
+      "category": "permissive",
+      "description": "Forward CG limit 1 mm too generous",
+      "find": "cg >= limits.fwd",
+      "replace": "cg >= limits.fwd - 1"
+    },
+    {
+      "id": "P03",
+      "category": "permissive",
+      "description": "MTOM 1 kg too generous",
+      "find": "totalWeight <= limits.mtom",
+      "replace": "totalWeight <= limits.mtom + 1"
+    },
+    {
+      "id": "P04",
+      "category": "permissive",
+      "description": "Rearward CG check removed outright",
+      "find": " && cg <= limits.aft",
+      "replace": ""
+    },
+    {
+      "id": "P05",
+      "category": "permissive",
+      "description": "Minimum weight check removed outright",
+      "find": "totalWeight >= limits.minW && ",
+      "replace": ""
+    },
+    {
+      "id": "L01",
+      "category": "constant",
+      "description": "Cabin maximum 200 -> 210 kg",
+      "find": "maxOccupants: 200,",
+      "replace": "maxOccupants: 210,"
+    },
+    {
+      "id": "L02",
+      "category": "constant",
+      "description": "Minimum solo pilot 55 -> 50 kg",
+      "find": "minPilot: 55,",
+      "replace": "minPilot: 50,"
+    },
+    {
+      "id": "L03",
+      "category": "constant",
+      "description": "Max baggage 22 -> 25 lbs",
+      "find": "maxBaggage: 22,",
+      "replace": "maxBaggage: 25,"
+    },
+    {
+      "id": "L04",
+      "category": "constant",
+      "description": "Cabin maximum 440 -> 460 lbs",
+      "find": "maxOccupants: 440,",
+      "replace": "maxOccupants: 460,"
+    },
+    {
+      "id": "L05",
+      "category": "permissive",
+      "description": "Baggage check removed from hasLoadErrors",
+      "find": " || (this.load.baggage > lim.maxBaggage)",
+      "replace": ""
+    },
+    {
+      "id": "L06",
+      "category": "permissive",
+      "description": "Cabin check removed from hasLoadErrors",
+      "find": "((this.load.pilot + this.load.copilot) > lim.maxOccupants) || ",
+      "replace": ""
+    },
+    {
+      "id": "L07",
+      "category": "permissive",
+      "description": "Minimum pilot 5 kg too generous",
+      "find": "this.load.pilot < lim.minPilot",
+      "replace": "this.load.pilot < lim.minPilot - 5"
+    },
+    {
+      "id": "L08",
+      "category": "permissive",
+      "description": "Seat maximum 5 kg too generous",
+      "find": "this.load.pilot > lim.maxSeat",
+      "replace": "this.load.pilot > lim.maxSeat + 5"
+    },
+    {
+      "id": "L09",
+      "category": "logic",
+      "description": "Unit switch reads the forward limit into the rearward one",
+      "find": "this.activeLimits.aft = published.aft;",
+      "replace": "this.activeLimits.aft = published.fwd;"
+    }
+  ]
+}
